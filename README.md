@@ -29,6 +29,10 @@ Tier 3 of the 6-tier Bitcoin Commons architecture (BLVM technology stack):
 6. blvm-commons (governance enforcement)
 ```
 
+## Formal verification (CI)
+
+The **verify** job in **`.github/workflows/ci.yml`** installs **`cargo-spec-lock`** from crates.io, runs **`check-drift`**, then **`cargo spec-lock verify`** with **`--spec-path`** (merged **`F_*`** registry + **`#[spec_locked]`** rows; **`formula_registry`** nested in **`spec_lock_verify.json`**). JSON fields and **`jq`**: **`blvm-spec-lock`** **`docs/VERIFY_JSON.md`**.
+
 ## Features
 
 - **Protocol Variants**: Mainnet, testnet, regtest support

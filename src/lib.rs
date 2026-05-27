@@ -342,9 +342,26 @@ impl BitcoinProtocolEngine {
         utxos: &UtxoSet,
         height: u64,
     ) -> Result<ValidationResult> {
+        let network = match self.protocol_version {
+            ProtocolVersion::BitcoinV1 => types::Network::Mainnet,
+            ProtocolVersion::Testnet3 => types::Network::Testnet,
+            ProtocolVersion::Regtest => types::Network::Regtest,
+        };
+        let witnesses: Vec<Vec<blvm_consensus::segwit::Witness>> = block
+            .transactions
+            .iter()
+            .map(|tx| tx.inputs.iter().map(|_| Vec::new()).collect())
+            .collect();
         let (result, _) = self
             .consensus
-            .validate_block(block, utxos.clone(), height)
+            .validate_block_with_time_context(
+                block,
+                &witnesses,
+                utxos.clone(),
+                height,
+                None,
+                network,
+            )
             .map_err(ProtocolError::from)?;
         Ok(result)
     }

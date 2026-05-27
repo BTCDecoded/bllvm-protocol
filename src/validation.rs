@@ -185,13 +185,18 @@ impl BitcoinProtocolEngine {
         block: &Block,
         context: &ProtocolValidationContext,
     ) -> Result<()> {
-        // Check block size limits
-        let block_size = self.calculate_block_size(block);
-        if block_size > context.validation_rules.max_block_size {
+        // Check block weight limits (BIP141).
+        // `max_block_size` is in weight units (4,000,000 WU = 4MB weight).
+        // We only have stripped (no-witness) bytes here; each stripped byte costs 4 WU, so
+        // `stripped_bytes * 4` is a conservative upper bound on block weight.
+        // Full weight (with witness discount) is computed later when witness data is available.
+        let stripped_size = self.calculate_block_size(block);
+        let block_weight_upper = stripped_size.saturating_mul(4);
+        if block_weight_upper > context.validation_rules.max_block_size {
             return Err(ProtocolError::Validation(
                 format!(
-                    "Block size exceeds maximum: {} bytes (max {} bytes)",
-                    block_size, context.validation_rules.max_block_size
+                    "Block weight exceeds maximum: {} WU (max {} WU); stripped_size={}",
+                    block_weight_upper, context.validation_rules.max_block_size, stripped_size
                 )
                 .into(),
             ));
