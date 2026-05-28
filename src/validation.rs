@@ -157,7 +157,10 @@ impl ProtocolValidationContext {
 }
 
 impl BitcoinProtocolEngine {
-    /// Validate a block with protocol-specific rules
+    /// Validate a block with protocol-specific rules (witness-blind).
+    ///
+    /// The block weight check is a lower bound only.  Use
+    /// [`validate_block_with_protocol_and_witnesses`] for accurate BIP141 weight enforcement.
     pub fn validate_block_with_protocol(
         &self,
         block: &Block,
@@ -165,9 +168,22 @@ impl BitcoinProtocolEngine {
         _height: u64,
         context: &ProtocolValidationContext,
     ) -> Result<ValidationResult> {
-        // First, apply protocol-specific validation
         self.apply_protocol_validation(block, context)?;
+        Ok(ValidationResult::Valid)
+    }
 
+    /// Validate a block with protocol-specific rules and witness data.
+    ///
+    /// Performs a full BIP141 weight check using the provided witnesses.
+    pub fn validate_block_with_protocol_and_witnesses(
+        &self,
+        block: &Block,
+        witnesses: &[Vec<blvm_consensus::segwit::Witness>],
+        _utxos: &UtxoSet,
+        _height: u64,
+        context: &ProtocolValidationContext,
+    ) -> Result<ValidationResult> {
+        self.apply_protocol_validation_with_witnesses(block, Some(witnesses), context)?;
         Ok(ValidationResult::Valid)
     }
 
@@ -186,43 +202,63 @@ impl BitcoinProtocolEngine {
         Ok(consensus_result)
     }
 
-    /// Apply protocol-specific validation rules
+    /// Apply protocol-specific validation rules (witness-blind; lower-bound weight only).
+    ///
+    /// This variant does not have witness data available, so the block weight check is a
+    /// lower bound: it rejects blocks whose **base weight** (`stripped_size × 4`) alone
+    /// exceeds the 4 MWU limit, but cannot catch blocks that are within the base limit yet
+    /// exceed 4 MWU due to large witness data.  Prefer
+    /// [`apply_protocol_validation_with_witnesses`] when witness data is available.
     fn apply_protocol_validation(
         &self,
         block: &Block,
         context: &ProtocolValidationContext,
     ) -> Result<()> {
-        // Check block weight limits (BIP141).
-        // `max_block_size` is in weight units (4,000,000 WU = 4MB weight).
-        //
-        // LIMITATION (P1-H/P1-I): the `Block` type carries no witness data, so we can only
-        // compute base weight here (stripped_size * 4). BIP141 actual weight is:
-        //   weight = stripped_size * 4 + witness_size
-        // A block with stripped_size < 1 MB can still exceed 4 MWU if its witnesses are large.
-        // This check is therefore a LOWER BOUND — it rejects blocks whose base weight alone
-        // exceeds the limit but cannot catch witness-heavy blocks that slip under the base check.
-        // Full witness-aware weight validation requires witnesses to flow into this path (see P1-I).
+        self.apply_protocol_validation_with_witnesses(block, None, context)
+    }
+
+    /// Apply protocol-specific validation rules with optional witness data.
+    ///
+    /// When `witnesses` is `Some`, the BIP141 weight check uses the full formula:
+    /// `weight = stripped_size × 4 + total_witness_size`, which correctly rejects
+    /// blocks with heavy witness stacks that would otherwise slip under the base check.
+    ///
+    /// When `witnesses` is `None` the check falls back to `stripped_size × 4` (lower bound).
+    fn apply_protocol_validation_with_witnesses(
+        &self,
+        block: &Block,
+        witnesses: Option<&[Vec<blvm_consensus::segwit::Witness>]>,
+        context: &ProtocolValidationContext,
+    ) -> Result<()> {
+        // BIP141 block weight check.
         let stripped_size = self.calculate_block_size(block);
-        let base_weight = stripped_size.saturating_mul(4);
-        if base_weight > context.validation_rules.max_block_size {
+        let weight = if let Some(wit) = witnesses {
+            // Full BIP141 weight: base × 4 + witness bytes (counted at ×1).
+            let witness_bytes: u64 = wit
+                .iter()
+                .flat_map(|tx_wit| tx_wit.iter())
+                .map(|w| w.len() as u64)
+                .sum();
+            stripped_size as u64 * 4 + witness_bytes
+        } else {
+            stripped_size as u64 * 4
+        };
+        if weight > context.validation_rules.max_block_size as u64 {
             return Err(ProtocolError::Validation(
                 format!(
-                    "Block base weight exceeds maximum: {} WU (max {} WU); stripped_size={}",
-                    base_weight, context.validation_rules.max_block_size, stripped_size
+                    "Block weight exceeds maximum: {} WU (max {} WU)",
+                    weight, context.validation_rules.max_block_size
                 )
                 .into(),
             ));
         }
 
-        // Check transaction count limits
         if block.transactions.len() > 10000 {
-            // Reasonable limit
             return Err(ProtocolError::Validation(
                 "Too many transactions in block (max 10000)".into(),
             ));
         }
 
-        // Validate each transaction with protocol rules
         for tx in &block.transactions {
             self.apply_transaction_protocol_validation(tx, context)?;
         }

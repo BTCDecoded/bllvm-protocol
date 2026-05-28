@@ -44,7 +44,9 @@ pub enum NetworkMessage {
     GetData(GetDataMessage),
     GetHeaders(GetHeadersMessage),
     Headers(HeadersMessage),
-    Block(Arc<Block>),
+    /// Full block message.  Witnesses are required for correct SegWit/Taproot validation and
+    /// wire round-tripping.  The second field is the per-tx, per-input witness stack.
+    Block(Arc<Block>, Vec<Vec<blvm_consensus::segwit::Witness>>),
     Tx(Arc<Transaction>),
     Ping(PingMessage),
     Pong(PongMessage),
@@ -617,8 +619,8 @@ pub fn process_network_message(
             process_getheaders_message(getheaders, chain_access, config)
         }
         NetworkMessage::Headers(headers) => process_headers_message(headers, config),
-        NetworkMessage::Block(block) => {
-            process_block_message(engine, block, utxo_set, height, config)
+        NetworkMessage::Block(block, witnesses) => {
+            process_block_message(engine, block, witnesses, utxo_set, height, config)
         }
         NetworkMessage::Tx(tx) => process_tx_message(engine, tx, height),
         NetworkMessage::Ping(ping) => process_ping_message(ping, peer_state),
@@ -821,7 +823,9 @@ fn process_getdata_message(
                     2 => {
                         // MSG_BLOCK
                         if let Some(block) = obj.as_block() {
-                            responses.push(NetworkMessage::Block(Arc::clone(block)));
+                            // ChainObject doesn't carry witnesses; relay with empty witnesses
+                            // (pre-SegWit peers or blocks fetched without witness data).
+                            responses.push(NetworkMessage::Block(Arc::clone(block), vec![]));
                         }
                     }
                     _ => {
@@ -887,6 +891,7 @@ fn process_headers_message(
 fn process_block_message(
     engine: &BitcoinProtocolEngine,
     block: &Block,
+    witnesses: &[Vec<blvm_consensus::segwit::Witness>],
     utxo_set: Option<&UtxoSet>,
     height: Option<u64>,
     config: &ProtocolConfig,
@@ -902,7 +907,9 @@ fn process_block_message(
     // Delegate to consensus via protocol engine (requires utxo_set and height)
     if let (Some(utxos), Some(h)) = (utxo_set, height) {
         let context = ProtocolValidationContext::new(engine.get_protocol_version(), h)?;
-        let result = engine.validate_block_with_protocol(block, utxos, h, &context)?;
+        // Pass witnesses for full BIP141/Taproot weight and script validation.
+        let result = engine
+            .validate_block_with_protocol_and_witnesses(block, witnesses, utxos, h, &context)?;
 
         match result {
             ValidationResult::Valid => Ok(NetworkResponse::Ok),

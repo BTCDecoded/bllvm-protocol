@@ -544,7 +544,7 @@ fn test_block_transaction_count_limit() {
     // Protocol limit check happens before consensus validation
     let response = process_network_message(
         &engine,
-        &NetworkMessage::Block(Arc::new(block)),
+        &NetworkMessage::Block(Arc::new(block), vec![]),
         &mut peer_state,
         None, // chain_access
         Some(&utxo_set),
@@ -599,7 +599,7 @@ fn test_block_transaction_count_limit() {
     // But we still need to provide utxo_set and height for the function signature
     let response = process_network_message(
         &engine,
-        &NetworkMessage::Block(Arc::new(block)),
+        &NetworkMessage::Block(Arc::new(block), vec![]),
         &mut peer_state,
         None, // chain_access
         Some(&utxo_set),

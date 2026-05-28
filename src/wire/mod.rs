@@ -34,7 +34,7 @@ pub fn serialize_message(message: &NetworkMessage, magic_bytes: [u8; 4]) -> Resu
         NetworkMessage::GetData(g) => ("getdata", serialize_getdata(g)?),
         NetworkMessage::GetHeaders(gh) => ("getheaders", serialize_getheaders(gh)?),
         NetworkMessage::Headers(h) => ("headers", serialize_headers(h)?),
-        NetworkMessage::Block(b) => ("block", serialize_block(b)?),
+        NetworkMessage::Block(b, witnesses) => ("block", serialize_block_witnesses(b, witnesses)?),
         NetworkMessage::Tx(tx) => ("tx", serialize_tx(tx)?),
         NetworkMessage::Ping(p) => ("ping", serialize_ping(p)?),
         NetworkMessage::Pong(p) => ("pong", serialize_pong(p)?),
@@ -175,7 +175,10 @@ pub fn deserialize_message<R: Read>(
         "getdata" => NetworkMessage::GetData(deserialize_getdata(&payload)?),
         "getheaders" => NetworkMessage::GetHeaders(deserialize_getheaders(&payload)?),
         "headers" => NetworkMessage::Headers(deserialize_headers(&payload)?),
-        "block" => NetworkMessage::Block(Arc::new(deserialize_block(&payload)?)),
+        "block" => {
+            let (block, witnesses) = deserialize_block_with_witnesses_pair(&payload)?;
+            NetworkMessage::Block(Arc::new(block), witnesses)
+        }
         "tx" => NetworkMessage::Tx(Arc::new(deserialize_tx(&payload)?)),
         "ping" => NetworkMessage::Ping(deserialize_ping(&payload)?),
         "pong" => NetworkMessage::Pong(deserialize_pong(&payload)?),
@@ -907,20 +910,54 @@ pub fn deserialize_headers(data: &[u8]) -> Result<crate::network::HeadersMessage
     Ok(crate::network::HeadersMessage { headers })
 }
 
-pub fn serialize_block(b: &crate::Block) -> Result<Vec<u8>> {
+/// Serialize a block with its witness stacks for P2P relay.
+///
+/// `witnesses` is the per-tx, per-input witness stack (same layout as [`BlockMessage::witnesses`]).
+/// Pass an empty slice to produce a legacy (pre-SegWit) serialization.
+pub fn serialize_block_witnesses(
+    b: &crate::Block,
+    witnesses: &[Vec<blvm_consensus::segwit::Witness>],
+) -> Result<Vec<u8>> {
     use crate::serialization::serialize_block_with_witnesses;
 
-    // NetworkMessage::Block only has Arc<Block>; no witnesses. Use empty witnesses and
-    // include_witness=false for legacy/pre-SegWit format. For SegWit blocks, this produces
-    // non-witness serialization (valid for some use cases).
-    let empty_witnesses: Vec<Vec<blvm_consensus::segwit::Witness>> =
-        (0..b.transactions.len()).map(|_| Vec::new()).collect();
-    Ok(serialize_block_with_witnesses(b, &empty_witnesses, false))
+    let include_witness = !witnesses.is_empty() && witnesses.iter().any(|tx_w| !tx_w.is_empty());
+
+    // Pad witnesses to match transaction count if a non-empty slice was provided but is shorter.
+    let padded;
+    let ws: &[Vec<blvm_consensus::segwit::Witness>] = if witnesses.len() < b.transactions.len() {
+        padded = {
+            let mut v = witnesses.to_vec();
+            v.resize(b.transactions.len(), Vec::new());
+            v
+        };
+        &padded
+    } else {
+        witnesses
+    };
+
+    Ok(serialize_block_with_witnesses(b, ws, include_witness))
 }
-pub fn deserialize_block(data: &[u8]) -> Result<crate::Block> {
+
+/// Deserialize a block from P2P wire bytes, preserving its witness stacks.
+///
+/// Returns `(block, per_tx_witnesses)`.  The witness vec is empty if the message
+/// was serialized in legacy (non-SegWit) format.
+pub fn deserialize_block_with_witnesses_pair(
+    data: &[u8],
+) -> Result<(crate::Block, Vec<Vec<blvm_consensus::segwit::Witness>>)> {
     use crate::serialization::block::deserialize_block_with_witnesses;
 
-    let (block, _witnesses) = deserialize_block_with_witnesses(data)?;
+    deserialize_block_with_witnesses(data).map_err(|e| {
+        ProtocolError::Consensus(ConsensusError::Serialization(Cow::Owned(e.to_string())))
+    })
+}
+
+/// Deserialize only the block, discarding any witness data.
+///
+/// Prefer [`deserialize_block_with_witnesses_pair`] for new call-sites; this
+/// helper is retained for legacy uses where witnesses are not needed.
+pub fn deserialize_block(data: &[u8]) -> Result<crate::Block> {
+    let (block, _witnesses) = deserialize_block_with_witnesses_pair(data)?;
     Ok(block)
 }
 

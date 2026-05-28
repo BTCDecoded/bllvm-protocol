@@ -335,7 +335,21 @@ impl BitcoinProtocolEngine {
         &self.network_params
     }
 
-    /// Validate a block using this protocol's rules
+    /// Validate a block using this protocol's rules.
+    ///
+    /// **Deprecated**: this API builds empty witness vectors for every input and passes
+    /// `None` for the time context, so:
+    ///   - SegWit and Taproot scripts are validated against empty witness stacks (always fail
+    ///     on witness-dependent scripts).
+    ///   - Time-dependent checks fall back to wall-clock time instead of the median-time-past
+    ///     computed from actual block headers.
+    ///
+    /// Prefer [`validate_and_connect_block`], which accepts explicit witnesses and a
+    /// [`validation::ProtocolValidationContext`] with a correct `median_time_past`.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use validate_and_connect_block with explicit witnesses and a ProtocolValidationContext"
+    )]
     pub fn validate_block(
         &self,
         block: &Block,
@@ -347,11 +361,26 @@ impl BitcoinProtocolEngine {
             ProtocolVersion::Testnet3 => types::Network::Testnet,
             ProtocolVersion::Regtest => types::Network::Regtest,
         };
+        // Empty witnesses: SegWit/Taproot inputs will fail witness-dependent checks.
+        // This is acceptable here only because callers of this deprecated API either
+        // use pre-SegWit blocks or do not need full witness validation.
         let witnesses: Vec<Vec<blvm_consensus::segwit::Witness>> = block
             .transactions
             .iter()
             .map(|tx| tx.inputs.iter().map(|_| Vec::new()).collect())
             .collect();
+        // Use current wall-clock as the network time context.  For accurate median-time-past
+        // validation, use validate_and_connect_block with an explicit context.
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let time_ctx = blvm_consensus::types::TimeContext {
+            network_time: now_secs,
+            // Without prior block history we approximate MTP as the current wall clock;
+            // callers with a real chain tip should use validate_and_connect_block.
+            median_time_past: now_secs,
+        };
         let (result, _) = self
             .consensus
             .validate_block_with_time_context(
@@ -359,7 +388,7 @@ impl BitcoinProtocolEngine {
                 &witnesses,
                 utxos.clone(),
                 height,
-                None,
+                Some(time_ctx),
                 network,
             )
             .map_err(ProtocolError::from)?;
@@ -441,8 +470,9 @@ impl BitcoinProtocolEngine {
         recent_headers: Option<&[BlockHeader]>,
         context: &validation::ProtocolValidationContext,
     ) -> Result<(ValidationResult, UtxoSet)> {
-        // First, protocol validation (size limits, feature flags)
-        let protocol_result = self.validate_block_with_protocol(block, utxos, height, context)?;
+        // First, protocol validation with witnesses for accurate BIP141 weight check.
+        let protocol_result = self
+            .validate_block_with_protocol_and_witnesses(block, witnesses, utxos, height, context)?;
         if !matches!(protocol_result, ValidationResult::Valid) {
             return Ok((protocol_result, utxos.clone()));
         }
