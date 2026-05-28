@@ -86,17 +86,18 @@ fn test_feature_activation_bip9() {
         bip_number: Some(141),
     };
 
-    // BIP9 activates if either height OR timestamp is met
-    // Before both
+    // BIP9 with activation_height set: height is authoritative.
+    // Before both: not active.
     assert!(!feature.is_active_at(99, 999));
 
-    // Height met, timestamp not
+    // Height met, timestamp not: active (height is the gate).
     assert!(feature.is_active_at(100, 999));
 
-    // Timestamp met, height not
-    assert!(feature.is_active_at(99, 1000));
+    // Timestamp met, height not: NOT active.
+    // Corrected: timestamp alone cannot activate when activation_height is set.
+    assert!(!feature.is_active_at(99, 1000));
 
-    // Both met
+    // Both met: active.
     assert!(feature.is_active_at(100, 1000));
 }
 

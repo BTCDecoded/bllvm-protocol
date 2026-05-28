@@ -5,6 +5,7 @@
 //! and protocol-specific validation logic.
 
 use crate::error::ProtocolError;
+use crate::features::FeatureRegistry;
 use crate::{BitcoinProtocolEngine, NetworkParameters, ProtocolVersion};
 use crate::{Block, Transaction, ValidationResult};
 use blvm_consensus::types::UtxoSet;
@@ -97,6 +98,11 @@ pub struct ProtocolValidationContext {
     pub network_params: NetworkParameters,
     /// Protocol validation rules
     pub validation_rules: ProtocolValidationRules,
+    /// Feature activation registry for this protocol version.
+    ///
+    /// Used by `is_feature_enabled` to derive activation status from
+    /// `block_height` / `network_time` rather than static booleans.
+    pub feature_registry: FeatureRegistry,
     /// Median time-past used for time-based validation (BIP113)
     ///
     /// This is populated by the node using recent headers and is threaded down
@@ -117,10 +123,12 @@ impl ProtocolValidationContext {
         let network_params = NetworkParameters::for_version(version)?;
         let validation_rules = ProtocolValidationRules::for_protocol(version);
 
+        let feature_registry = FeatureRegistry::for_protocol(version);
         Ok(Self {
             block_height,
             network_params,
             validation_rules,
+            feature_registry,
             // Default to zero; callers that care about time must set these explicitly.
             median_time_past: 0,
             network_time: 0,
@@ -128,14 +136,13 @@ impl ProtocolValidationContext {
         })
     }
 
-    /// Check if a feature is enabled at current block height
+    /// Check if a feature is enabled at the current block height and network time.
+    ///
+    /// Queries the `FeatureRegistry` so activation reflects the actual deployment
+    /// height/timestamp rather than static booleans that ignore `block_height`.
     pub fn is_feature_enabled(&self, feature: &str) -> bool {
-        match feature {
-            "segwit" => self.validation_rules.segwit_enabled,
-            "taproot" => self.validation_rules.taproot_enabled,
-            "rbf" => self.validation_rules.rbf_enabled,
-            _ => false,
-        }
+        self.feature_registry
+            .is_feature_active(feature, self.block_height, self.network_time)
     }
 
     /// Get maximum allowed size for a component
@@ -187,16 +194,21 @@ impl BitcoinProtocolEngine {
     ) -> Result<()> {
         // Check block weight limits (BIP141).
         // `max_block_size` is in weight units (4,000,000 WU = 4MB weight).
-        // We only have stripped (no-witness) bytes here; each stripped byte costs 4 WU, so
-        // `stripped_bytes * 4` is a conservative upper bound on block weight.
-        // Full weight (with witness discount) is computed later when witness data is available.
+        //
+        // LIMITATION (P1-H/P1-I): the `Block` type carries no witness data, so we can only
+        // compute base weight here (stripped_size * 4). BIP141 actual weight is:
+        //   weight = stripped_size * 4 + witness_size
+        // A block with stripped_size < 1 MB can still exceed 4 MWU if its witnesses are large.
+        // This check is therefore a LOWER BOUND — it rejects blocks whose base weight alone
+        // exceeds the limit but cannot catch witness-heavy blocks that slip under the base check.
+        // Full witness-aware weight validation requires witnesses to flow into this path (see P1-I).
         let stripped_size = self.calculate_block_size(block);
-        let block_weight_upper = stripped_size.saturating_mul(4);
-        if block_weight_upper > context.validation_rules.max_block_size {
+        let base_weight = stripped_size.saturating_mul(4);
+        if base_weight > context.validation_rules.max_block_size {
             return Err(ProtocolError::Validation(
                 format!(
-                    "Block weight exceeds maximum: {} WU (max {} WU); stripped_size={}",
-                    block_weight_upper, context.validation_rules.max_block_size, stripped_size
+                    "Block base weight exceeds maximum: {} WU (max {} WU); stripped_size={}",
+                    base_weight, context.validation_rules.max_block_size, stripped_size
                 )
                 .into(),
             ));
@@ -359,8 +371,9 @@ mod tests {
 
     #[test]
     fn test_validation_context() {
-        let context = ProtocolValidationContext::new(ProtocolVersion::BitcoinV1, 1000).unwrap();
-        assert_eq!(context.block_height, 1000);
+        // Use a height past both segwit (481824) and taproot (709632) activation.
+        let context = ProtocolValidationContext::new(ProtocolVersion::BitcoinV1, 800_000).unwrap();
+        assert_eq!(context.block_height, 800_000);
         assert!(context.is_feature_enabled("segwit"));
         assert!(!context.is_feature_enabled("nonexistent"));
         assert_eq!(context.get_max_size("block"), 4_000_000);
@@ -368,17 +381,19 @@ mod tests {
 
     #[test]
     fn test_validation_context_all_protocols() {
+        // Per-network heights past segwit+taproot activation:
+        //   mainnet: taproot at 709_632   → use 800_000
+        //   testnet3: taproot at 2_016_000 → use 2_100_000
+        //   regtest: all features AlwaysActive → any height works
         let mainnet_context =
-            ProtocolValidationContext::new(ProtocolVersion::BitcoinV1, 1000).unwrap();
+            ProtocolValidationContext::new(ProtocolVersion::BitcoinV1, 800_000).unwrap();
         let testnet_context =
-            ProtocolValidationContext::new(ProtocolVersion::Testnet3, 1000).unwrap();
-        let regtest_context =
-            ProtocolValidationContext::new(ProtocolVersion::Regtest, 1000).unwrap();
+            ProtocolValidationContext::new(ProtocolVersion::Testnet3, 2_100_000).unwrap();
+        let regtest_context = ProtocolValidationContext::new(ProtocolVersion::Regtest, 1).unwrap();
 
-        // All should have same block height
-        assert_eq!(mainnet_context.block_height, 1000);
-        assert_eq!(testnet_context.block_height, 1000);
-        assert_eq!(regtest_context.block_height, 1000);
+        assert_eq!(mainnet_context.block_height, 800_000);
+        assert_eq!(testnet_context.block_height, 2_100_000);
+        assert_eq!(regtest_context.block_height, 1);
 
         // All should support same features
         assert!(mainnet_context.is_feature_enabled("segwit"));
@@ -396,7 +411,8 @@ mod tests {
 
     #[test]
     fn test_validation_context_feature_queries() {
-        let context = ProtocolValidationContext::new(ProtocolVersion::BitcoinV1, 1000).unwrap();
+        // Height past both segwit (481824) and taproot (709632) so all features are active.
+        let context = ProtocolValidationContext::new(ProtocolVersion::BitcoinV1, 800_000).unwrap();
 
         // Test all supported features
         assert!(context.is_feature_enabled("segwit"));

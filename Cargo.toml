@@ -38,7 +38,7 @@ thiserror = "=1.0.69"
 
 # Cryptography - EXACT VERSIONS for security
 sha2 = "=0.10.9"
-ripemd = "=0.1.3"
+# ripemd is not used directly in blvm-protocol; blvm-consensus owns OP_HASH160 via its ripemd dep.
 # Pure-Rust secp256k1 (same implementation used by blvm-consensus).
 blvm-secp256k1 = { version = ">=0.1, <1" }
 hex = "=0.4.3"  # For hex encoding/decoding

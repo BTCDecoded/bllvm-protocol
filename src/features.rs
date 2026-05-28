@@ -61,11 +61,19 @@ impl FeatureActivation {
                 }
             }
             ActivationMethod::BIP9 => {
-                // BIP9 uses both height and timestamp for safety
-                // Feature is active if either condition is met after grace period
-                let height_active = self.activation_height.is_some_and(|h| height >= h);
-                let timestamp_active = self.activation_timestamp.is_some_and(|t| timestamp >= t);
-                height_active || timestamp_active
+                // BIP9 activation is determined by height (block height at which the deployment
+                // is considered ACTIVE after lock-in). Timestamp alone must NOT activate a
+                // feature — that was the bug: `height_active || timestamp_active` allowed
+                // timestamp to short-circuit the height gate.
+                //
+                // If activation_height is set, it is the authoritative gate.
+                // Timestamp is only used as the gate when no activation_height is configured
+                // (timestamp-only BIP9 pre-height-based locking).
+                if self.activation_height.is_some() {
+                    self.activation_height.is_some_and(|h| height >= h)
+                } else {
+                    self.activation_timestamp.is_some_and(|t| timestamp >= t)
+                }
             }
         }
     }
@@ -465,12 +473,17 @@ mod tests {
     fn test_bip9_height_and_timestamp() {
         let registry = FeatureRegistry::mainnet();
 
-        // BIP9 features activate if either height OR timestamp is met
-        // Test height met but timestamp not met (should still activate)
+        // BIP9 with activation_height set: height is authoritative.
+        // Height met, timestamp below activation → active (height wins).
         assert!(registry.is_feature_active("segwit", 481_824, 1500000000));
 
-        // Test timestamp met but height not met (should still activate)
-        assert!(registry.is_feature_active("segwit", 481_000, 1503539857));
+        // Height NOT met, timestamp at/above activation → NOT active.
+        // This is the corrected behaviour: timestamp alone cannot activate
+        // a BIP9 feature that has an explicit activation_height configured.
+        assert!(!registry.is_feature_active("segwit", 481_000, 1503539857));
+
+        // Both met → active.
+        assert!(registry.is_feature_active("segwit", 481_824, 1503539857));
     }
 
     #[test]

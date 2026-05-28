@@ -198,19 +198,21 @@ fn test_feature_activation_bip9() {
 
     let registry = FeatureRegistry::for_protocol(ProtocolVersion::BitcoinV1);
 
-    // BIP9 activates if either height OR timestamp condition is met
-    // Before both
+    // BIP9 with activation_height set: height is authoritative.
+    // Before both: not active.
     let before = create_feature_context(&registry, SEGWIT_ACTIVATION_MAINNET - 1, 1503539856);
     assert!(!activation.is_active_at(before.height, before.timestamp));
 
-    // At height but before timestamp
+    // At height but before timestamp: active (height is the gate).
     let height_met = create_feature_context(&registry, SEGWIT_ACTIVATION_MAINNET, 1503539856);
     assert!(activation.is_active_at(height_met.height, height_met.timestamp));
 
-    // At timestamp but before height
+    // At timestamp but before height: NOT active.
+    // Corrected behaviour: timestamp alone cannot activate a BIP9 feature
+    // that has an explicit activation_height configured.
     let timestamp_met =
         create_feature_context(&registry, SEGWIT_ACTIVATION_MAINNET - 1, 1503539857);
-    assert!(activation.is_active_at(timestamp_met.height, timestamp_met.timestamp));
+    assert!(!activation.is_active_at(timestamp_met.height, timestamp_met.timestamp));
 }
 
 // ============================================================================
