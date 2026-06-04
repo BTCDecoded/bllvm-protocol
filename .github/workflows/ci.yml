@@ -326,6 +326,10 @@ jobs:
       - name: Strip [patch.crates-io] for crates.io-only CI
         uses: BTCDecoded/rust-ci/strip-patch-crates-io@main
 
+      - name: Clean stale blvm-spec checkout
+        run: |
+          if [ -d "../blvm-spec" ]; then rm -rf ../blvm-spec; fi
+
       - name: Setup blvm-spec (PROTOCOL.md + ARCHITECTURE.md for verification)
         uses: BTCDecoded/rust-ci/setup-blvm-spec@main
 

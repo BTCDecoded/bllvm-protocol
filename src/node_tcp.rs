@@ -611,7 +611,14 @@ pub struct TcpFramedParser;
 impl TcpFramedParser {
     /// Parse a raw message into a protocol message
     /// Orange Paper 10.1.1: ParseMessage, size bounds, checksum rejection
-    #[cfg_attr(feature = "protocol-verification", spec_locked("10.1.1"))]
+    #[cfg_attr(
+        feature = "protocol-verification",
+        spec_locked("10.1.1", "ParseMessage")
+    )]
+    #[cfg_attr(
+        feature = "protocol-verification",
+        blvm_spec_lock::ensures(data.len() >= 24 || result.is_err())
+    )]
     pub fn parse_message(data: &[u8], allowed_commands: &[&str]) -> Result<ProtocolMessage> {
         use tracing::{debug, warn};
 
@@ -1022,7 +1029,14 @@ impl TcpFramedParser {
     ///
     /// Computes double SHA256 of payload and returns first 4 bytes.
     /// Orange Paper 10.1.1: CalculateChecksum, |result| = 4
-    #[cfg_attr(feature = "protocol-verification", spec_locked("10.1.1"))]
+    #[cfg_attr(
+        feature = "protocol-verification",
+        spec_locked("10.1.1", "CalculateChecksum")
+    )]
+    #[cfg_attr(
+        feature = "protocol-verification",
+        blvm_spec_lock::ensures(result.len() == 4)
+    )]
     pub fn calculate_checksum(payload: &[u8]) -> [u8; 4] {
         crate::p2p_frame::bitcoin_p2p_payload_checksum(payload)
     }

@@ -239,7 +239,9 @@ impl UtxoMerkleTree {
     }
 
     /// Generate a UTXO commitment
-    #[spec_locked("11.4")]
+    #[spec_locked("11.4", "GenerateCommitment")]
+    #[blvm_spec_lock::ensures(result.block_height == block_height)]
+    #[blvm_spec_lock::ensures(result.block_hash == block_hash)]
     pub fn generate_commitment(&self, block_hash: Hash, block_height: Natural) -> UtxoCommitment {
         let merkle_root = self.root();
         UtxoCommitment::new(
