@@ -5,9 +5,9 @@
 
 use blvm_consensus::{BlockHeader, Hash};
 use blvm_protocol::network::{
-    process_network_message, AddrMessage, GetDataMessage, GetHeadersMessage, HeadersMessage,
-    InvMessage, NetworkAddress, NetworkMessage, NetworkResponse, PeerState, RejectMessage,
-    VersionMessage,
+    AddrMessage, GetDataMessage, GetHeadersMessage, HeadersMessage, InvMessage, NetworkAddress,
+    NetworkMessage, NetworkResponse, PeerState, RejectMessage, VersionMessage,
+    process_network_message,
 };
 use blvm_protocol::{BitcoinProtocolEngine, ProtocolVersion};
 

@@ -56,7 +56,7 @@ pub use config::*;
 #[cfg(feature = "utxo-commitments")]
 pub use data_structures::*;
 #[cfg(feature = "utxo-commitments")]
-pub use initial_sync::{update_commitments_after_block, InitialSync};
+pub use initial_sync::{InitialSync, update_commitments_after_block};
 #[cfg(feature = "utxo-commitments")]
 pub use merkle_tree::UtxoMerkleTree;
 #[cfg(feature = "utxo-commitments")]

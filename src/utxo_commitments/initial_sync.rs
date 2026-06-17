@@ -21,7 +21,7 @@ use crate::utxo_commitments::network_integration::UtxoCommitmentsNetworkClient;
 use crate::utxo_commitments::peer_consensus::{ConsensusConfig, PeerConsensus, PeerInfo};
 #[cfg(feature = "utxo-commitments")]
 use blvm_consensus::types::{
-    BlockHeader, Hash as HashType, Natural, OutPoint, Transaction, UtxoSet, UTXO,
+    BlockHeader, Hash as HashType, Natural, OutPoint, Transaction, UTXO, UtxoSet,
 };
 #[cfg(feature = "utxo-commitments")]
 /// Initial sync manager
@@ -94,11 +94,7 @@ impl InitialSync {
             self.peer_consensus.determine_checkpoint_height(peer_tips)
         } else if !header_chain.is_empty() {
             let tip = header_chain.len() as Natural - 1;
-            if tip > self.peer_consensus.config.safety_margin {
-                tip - self.peer_consensus.config.safety_margin
-            } else {
-                0
-            }
+            tip.saturating_sub(self.peer_consensus.config.safety_margin)
         } else {
             return Err(UtxoCommitmentError::VerificationFailed(
                 "No header chain or peer tips available".to_string(),
@@ -167,8 +163,8 @@ impl InitialSync {
     /// * `network` - Network type (Mainnet, Testnet, Regtest)
     /// * `network_time` - Current network time (Unix timestamp)
     /// * `recent_headers` - Recent block headers for median time-past calculation
-    /// * `checkpoint_utxo_set` - Full UTXO set at checkpoint (required for validation)
-    ///                          If None, starts with empty set (cannot verify checkpoint commitment until end)
+    /// * `checkpoint_utxo_set` - Full UTXO set at checkpoint (required for validation).
+    ///   If None, starts with empty set (cannot verify checkpoint commitment until end)
     ///
     /// # Implementation
     ///
@@ -181,6 +177,7 @@ impl InitialSync {
     /// 3. Updates UTXO tree incrementally after validation
     ///
     /// **Security**: All transactions are cryptographically verified before UTXO set update.
+    #[allow(clippy::too_many_arguments)]
     pub async fn complete_sync_from_checkpoint<C, F, Fut>(
         &self,
         utxo_tree: &mut UtxoMerkleTree,
@@ -219,8 +216,7 @@ impl InitialSync {
             // Verify block header height matches expected height
             if full_block.block.header.timestamp == 0 {
                 return Err(UtxoCommitmentError::VerificationFailed(format!(
-                    "Invalid block header at height {}",
-                    height
+                    "Invalid block header at height {height}"
                 )));
             }
 
@@ -238,8 +234,7 @@ impl InitialSync {
             )
             .map_err(|e| {
                 UtxoCommitmentError::VerificationFailed(format!(
-                    "connect_block failed at height {}: {}",
-                    height, e
+                    "connect_block failed at height {height}: {e}"
                 ))
             })?;
 
@@ -249,8 +244,7 @@ impl InitialSync {
                 blvm_consensus::types::ValidationResult::Valid
             ) {
                 return Err(UtxoCommitmentError::VerificationFailed(format!(
-                    "Block validation failed at height {}: {:?}",
-                    height, validation_result
+                    "Block validation failed at height {height}: {validation_result:?}"
                 )));
             }
 
@@ -372,8 +366,7 @@ impl InitialSync {
                             // Remove the UTXO (even if transaction is spam)
                             if let Err(e) = utxo_tree.remove(&input.prevout, &utxo) {
                                 return Err(UtxoCommitmentError::TransactionApplication(format!(
-                                    "Failed to remove spent input: {:?}",
-                                    e
+                                    "Failed to remove spent input: {e:?}"
                                 )));
                             }
                         }
@@ -384,8 +377,7 @@ impl InitialSync {
                         }
                         Err(e) => {
                             return Err(UtxoCommitmentError::TransactionApplication(format!(
-                                "Failed to get UTXO for removal: {:?}",
-                                e
+                                "Failed to get UTXO for removal: {e:?}"
                             )));
                         }
                     }
@@ -410,8 +402,7 @@ impl InitialSync {
 
                     if let Err(e) = utxo_tree.insert(outpoint, utxo) {
                         return Err(UtxoCommitmentError::TransactionApplication(format!(
-                            "Failed to add output: {:?}",
-                            e
+                            "Failed to add output: {e:?}"
                         )));
                     }
                 }
@@ -516,8 +507,7 @@ pub fn update_commitments_after_block(
                         }
                         Err(e) => {
                             return Err(UtxoCommitmentError::TransactionApplication(format!(
-                                "Failed to get UTXO for removal: {:?}",
-                                e
+                                "Failed to get UTXO for removal: {e:?}"
                             )));
                         }
                     }
@@ -586,7 +576,7 @@ fn compute_block_hash(header: &BlockHeader) -> HashType {
     bytes.extend_from_slice(&header.nonce.to_le_bytes());
 
     let first_hash = Sha256::digest(&bytes);
-    let second_hash = Sha256::digest(&first_hash);
+    let second_hash = Sha256::digest(first_hash);
 
     let mut hash = [0u8; 32];
     hash.copy_from_slice(&second_hash);

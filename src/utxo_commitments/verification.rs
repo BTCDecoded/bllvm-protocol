@@ -50,15 +50,13 @@ pub fn verify_header_chain(headers: &[BlockHeader]) -> UtxoCommitmentResult<bool
             Ok(is_valid) => {
                 if !is_valid {
                     return Err(UtxoCommitmentError::VerificationFailed(format!(
-                        "Invalid proof of work at height {}",
-                        i
+                        "Invalid proof of work at height {i}"
                     )));
                 }
             }
             Err(e) => {
                 return Err(UtxoCommitmentError::VerificationFailed(format!(
-                    "PoW check failed at height {}: {}",
-                    i, e
+                    "PoW check failed at height {i}: {e}"
                 )));
             }
         }

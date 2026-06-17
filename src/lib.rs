@@ -18,13 +18,13 @@ use serde::{Deserialize, Serialize};
 
 // Re-export commonly used types for convenience
 // This allows upper layers (like blvm-node) to depend only on blvm-protocol
+pub use blvm_consensus::ConsensusProof;
 pub use blvm_consensus::config::NetworkMessageLimits;
 pub use blvm_consensus::error::{ConsensusError, Result as ConsensusResult};
 pub use blvm_consensus::types::{
     Block, BlockHeader, ByteString, Hash, Integer, Natural, OutPoint, Transaction,
-    TransactionInput, TransactionOutput, UtxoSet, ValidationResult, Witness, UTXO,
+    TransactionInput, TransactionOutput, UTXO, UtxoSet, ValidationResult, Witness,
 };
-pub use blvm_consensus::ConsensusProof;
 
 #[cfg(all(feature = "production", feature = "benchmarking"))]
 pub use blvm_consensus::config::{reset_assume_valid_height, set_assume_valid_height};

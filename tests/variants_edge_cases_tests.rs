@@ -2,8 +2,8 @@
 //!
 //! Edge cases and transition scenarios for protocol variants.
 
-use blvm_protocol::variants::{ProtocolEvolution, ProtocolVariant};
 use blvm_protocol::ProtocolVersion;
+use blvm_protocol::variants::{ProtocolEvolution, ProtocolVariant};
 
 #[test]
 fn test_all_variants_list() {
@@ -11,15 +11,21 @@ fn test_all_variants_list() {
     let variants = ProtocolVariant::all_variants();
 
     assert_eq!(variants.len(), 3);
-    assert!(variants
-        .iter()
-        .any(|v| v.version == ProtocolVersion::BitcoinV1));
-    assert!(variants
-        .iter()
-        .any(|v| v.version == ProtocolVersion::Testnet3));
-    assert!(variants
-        .iter()
-        .any(|v| v.version == ProtocolVersion::Regtest));
+    assert!(
+        variants
+            .iter()
+            .any(|v| v.version == ProtocolVersion::BitcoinV1)
+    );
+    assert!(
+        variants
+            .iter()
+            .any(|v| v.version == ProtocolVersion::Testnet3)
+    );
+    assert!(
+        variants
+            .iter()
+            .any(|v| v.version == ProtocolVersion::Regtest)
+    );
 }
 
 #[test]
@@ -83,12 +89,16 @@ fn test_protocol_evolution_bitcoin_v1() {
     let evolution = ProtocolEvolution::bitcoin_v1();
 
     assert_eq!(evolution.version, 1);
-    assert!(evolution
-        .enabled_features
-        .contains(&"basic_transactions".to_string()));
-    assert!(evolution
-        .enabled_features
-        .contains(&"proof_of_work".to_string()));
+    assert!(
+        evolution
+            .enabled_features
+            .contains(&"basic_transactions".to_string())
+    );
+    assert!(
+        evolution
+            .enabled_features
+            .contains(&"proof_of_work".to_string())
+    );
     assert!(evolution.deprecated_features.is_empty());
 }
 
@@ -100,9 +110,11 @@ fn test_protocol_evolution_future_version() {
 
     assert!(evolution.version > 1);
     assert!(!evolution.enabled_features.is_empty());
-    assert!(evolution
-        .deprecated_features
-        .contains(&"legacy_addresses".to_string()));
+    assert!(
+        evolution
+            .deprecated_features
+            .contains(&"legacy_addresses".to_string())
+    );
 }
 
 #[test]

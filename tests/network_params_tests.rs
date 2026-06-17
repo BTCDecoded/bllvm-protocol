@@ -3,9 +3,9 @@
 //! Additional tests for network parameters and genesis blocks.
 //! Note: Basic tests exist in src/network_params.rs, these complement them.
 
+use blvm_protocol::ProtocolVersion;
 use blvm_protocol::genesis::{mainnet_genesis, regtest_genesis, testnet_genesis};
 use blvm_protocol::network_params::{Checkpoint, NetworkConstants};
-use blvm_protocol::ProtocolVersion;
 
 // ============================================================================
 // Phase 1: Genesis Block Tests

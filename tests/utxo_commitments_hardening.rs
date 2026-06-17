@@ -7,7 +7,7 @@
 mod tests {
     use blvm_consensus::block::BlockValidationContext;
     use blvm_consensus::test_utils::{create_coinbase_tx, create_test_header};
-    use blvm_consensus::types::{Block, Network, OutPoint, UtxoSet, ValidationResult, UTXO};
+    use blvm_consensus::types::{Block, Network, OutPoint, UTXO, UtxoSet, ValidationResult};
     use blvm_protocol::block::connect_block;
     use blvm_protocol::mining::calculate_merkle_root;
     use blvm_protocol::segwit::Witness;

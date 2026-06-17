@@ -2,8 +2,8 @@
 
 use blvm_protocol::network::{NetworkAddress, NetworkMessage, VersionMessage};
 use blvm_protocol::wire::{
-    calculate_checksum, deserialize_message, serialize_message, MAX_MESSAGE_PAYLOAD,
-    MESSAGE_HEADER_SIZE,
+    MAX_MESSAGE_PAYLOAD, MESSAGE_HEADER_SIZE, calculate_checksum, deserialize_message,
+    serialize_message,
 };
 use std::io::Cursor;
 

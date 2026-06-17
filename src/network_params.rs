@@ -243,17 +243,21 @@ mod tests {
 
         // Mainnet should have DNS seeds
         assert!(!mainnet.dns_seeds.is_empty());
-        assert!(mainnet
-            .dns_seeds
-            .iter()
-            .any(|seed| seed.contains("bitcoin")));
+        assert!(
+            mainnet
+                .dns_seeds
+                .iter()
+                .any(|seed| seed.contains("bitcoin"))
+        );
 
         // Testnet should have DNS seeds
         assert!(!testnet.dns_seeds.is_empty());
-        assert!(testnet
-            .dns_seeds
-            .iter()
-            .any(|seed| seed.contains("testnet")));
+        assert!(
+            testnet
+                .dns_seeds
+                .iter()
+                .any(|seed| seed.contains("testnet"))
+        );
 
         // Regtest should have no DNS seeds
         assert!(regtest.dns_seeds.is_empty());

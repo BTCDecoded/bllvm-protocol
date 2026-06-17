@@ -4,9 +4,9 @@
 //! denial-of-service attacks through oversized messages.
 
 use blvm_protocol::network::{
-    process_network_message, AddrMessage, FeeFilterMessage, GetBlocksMessage, GetDataMessage,
-    HeadersMessage, InvMessage, NetworkAddress, NetworkMessage, NotFoundMessage, PeerState,
-    RejectMessage, VersionMessage,
+    AddrMessage, FeeFilterMessage, GetBlocksMessage, GetDataMessage, HeadersMessage, InvMessage,
+    NetworkAddress, NetworkMessage, NotFoundMessage, PeerState, RejectMessage, VersionMessage,
+    process_network_message,
 };
 use blvm_protocol::{BitcoinProtocolEngine, ProtocolVersion};
 use std::sync::Arc;
@@ -509,8 +509,8 @@ fn test_version_message_user_agent_limit() {
 #[test]
 fn test_block_transaction_count_limit() {
     use blvm_consensus::types::UtxoSet;
-    use blvm_consensus::{tx_inputs, tx_outputs};
     use blvm_consensus::{Block, BlockHeader};
+    use blvm_consensus::{tx_inputs, tx_outputs};
 
     let engine = create_test_engine();
     let mut peer_state = create_test_peer_state();
