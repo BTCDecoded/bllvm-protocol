@@ -2,9 +2,9 @@
 //!
 //! Tests for genesis block generation across all network variants.
 
-use blvm_protocol::genesis::{mainnet_genesis, regtest_genesis, testnet_genesis};
 use blvm_protocol::BitcoinProtocolEngine;
 use blvm_protocol::ProtocolVersion;
+use blvm_protocol::genesis::{mainnet_genesis, regtest_genesis, testnet_genesis};
 
 #[test]
 fn test_mainnet_genesis_block() {

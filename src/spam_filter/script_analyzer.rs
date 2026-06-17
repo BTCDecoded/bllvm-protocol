@@ -544,7 +544,7 @@ mod tests {
         // 2-of-3 multi-sig: OP_3 <pubkey1> <pubkey2> <pubkey3> OP_2 OP_CHECKMULTISIG
         // Format: OP_n (n keys) <pubkey1>...<pubkeyn> OP_m (m required) OP_CHECKMULTISIG
         let mut script = vec![OP_3]; // n=3 keys
-                                     // Add 3 pubkeys (33 bytes each)
+        // Add 3 pubkeys (33 bytes each)
         for _ in 0..3 {
             script.push(PUSH_33_BYTES);
             script.extend(vec![0u8; 33]);

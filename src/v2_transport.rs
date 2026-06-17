@@ -3,15 +3,14 @@
 //! This module implements the encrypted transport protocol for Bitcoin P2P connections.
 //! It provides ElligatorSwift encoding, X-only ECDH key exchange, and ChaCha20Poly1305 encryption.
 
-use crate::error::ProtocolError;
 use crate::Result;
+use crate::error::ProtocolError;
 use blvm_secp256k1::ellswift::{ellswift_create, ellswift_xdh};
 use chacha20poly1305::{
-    aead::{Aead, AeadCore, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
+    aead::{Aead, KeyInit},
 };
 use getrandom::getrandom;
-use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 
 /// BIP324 v2 transport encryption state
@@ -67,8 +66,8 @@ fn rekey_derive_next_key(key: &[u8; 32], rekey_epoch: u64) -> Result<[u8; 32]> {
 impl V2Transport {
     /// Create a new v2 transport with established keys
     pub fn new(send_key: [u8; 32], recv_key: [u8; 32]) -> Self {
-        let send_cipher = ChaCha20Poly1305::new(&Key::from_slice(&send_key));
-        let recv_cipher = ChaCha20Poly1305::new(&Key::from_slice(&recv_key));
+        let send_cipher = ChaCha20Poly1305::new(Key::from_slice(&send_key));
+        let recv_cipher = ChaCha20Poly1305::new(Key::from_slice(&recv_key));
 
         Self {
             send_key,
@@ -91,7 +90,7 @@ impl V2Transport {
         // Encrypt plaintext
         let ciphertext = self.send_cipher.encrypt(nonce, plaintext).map_err(|e| {
             ProtocolError::Consensus(blvm_consensus::error::ConsensusError::Serialization(
-                Cow::Owned(format!("Encryption failed: {}", e)),
+                Cow::Owned(format!("Encryption failed: {e}")),
             ))
         })?;
 
@@ -99,7 +98,7 @@ impl V2Transport {
         self.send_nonce += 1;
 
         // BIP324 FSChaCha20Poly1305: rekey every REKEY_INTERVAL packets
-        if self.send_nonce.is_multiple_of(REKEY_INTERVAL) {
+        if self.send_nonce % REKEY_INTERVAL == 0 {
             let rekey_epoch = (self.send_nonce / REKEY_INTERVAL) - 1;
             self.send_key = rekey_derive_next_key(&self.send_key, rekey_epoch)?;
             self.send_cipher = ChaCha20Poly1305::new(Key::from_slice(&self.send_key));
@@ -183,14 +182,14 @@ impl V2Transport {
             .decrypt(nonce, ciphertext.as_slice())
             .map_err(|e| {
                 ProtocolError::Consensus(blvm_consensus::error::ConsensusError::Serialization(
-                    Cow::Owned(format!("Decryption failed: {}", e)),
+                    Cow::Owned(format!("Decryption failed: {e}")),
                 ))
             })?;
 
         // Increment nonce counter
         self.recv_nonce += 1;
 
-        if self.recv_nonce.is_multiple_of(REKEY_INTERVAL) {
+        if self.recv_nonce % REKEY_INTERVAL == 0 {
             let rekey_epoch = (self.recv_nonce / REKEY_INTERVAL) - 1;
             self.recv_key = rekey_derive_next_key(&self.recv_key, rekey_epoch)?;
             self.recv_cipher = ChaCha20Poly1305::new(Key::from_slice(&self.recv_key));
@@ -275,11 +274,10 @@ impl V2Handshake {
         let transport = V2Transport::new(send_key, recv_key);
 
         if let Self::Responder {
-            initiator_ellswift: ref mut iell,
-            ..
+            initiator_ellswift, ..
         } = self
         {
-            *iell = Some(initiator_ell64);
+            *initiator_ellswift = Some(initiator_ell64);
         }
 
         Ok((responder_ell64.to_vec(), transport))

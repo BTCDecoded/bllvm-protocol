@@ -9,16 +9,16 @@
 //! - Checksum: First 4 bytes of double SHA256 of payload
 //! - Payload: Message-specific data
 
-use crate::error::ProtocolError;
-use crate::network::NetworkMessage;
 use crate::ConsensusError;
 use crate::Result;
+use crate::error::ProtocolError;
+use crate::network::NetworkMessage;
 use std::borrow::Cow;
 use std::io::Read;
 use std::sync::Arc;
 
 mod frame_header;
-pub use frame_header::{calculate_checksum, MAX_MESSAGE_PAYLOAD, MESSAGE_HEADER_SIZE};
+pub use frame_header::{MAX_MESSAGE_PAYLOAD, MESSAGE_HEADER_SIZE, calculate_checksum};
 
 /// Serialize a network message to Bitcoin P2P wire format
 pub fn serialize_message(message: &NetworkMessage, magic_bytes: [u8; 4]) -> Result<Vec<u8>> {

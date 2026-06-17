@@ -372,7 +372,7 @@ mod tests {
 
         // Match a script that's not in the filter
         let script_not_in_filter = vec![0x53, 0x54]; // OP_3 OP_4
-                                                     // Note: May have false positives due to GCS nature, but should generally work
+        // Note: May have false positives due to GCS nature, but should generally work
         let _matched = match_filter(&filter, &script_not_in_filter);
         // False positives are possible, so we can't assert false
         // But we can verify the filter works for scripts that are definitely in it

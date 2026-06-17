@@ -306,12 +306,14 @@ mod tests {
         assert!(v2.is_deprecated("legacy_addresses"));
 
         // Test V2 has breaking changes
-        assert!(v2
-            .breaking_changes
-            .contains(&"new_address_format".to_string()));
-        assert!(v2
-            .breaking_changes
-            .contains(&"enhanced_script_engine".to_string()));
+        assert!(
+            v2.breaking_changes
+                .contains(&"new_address_format".to_string())
+        );
+        assert!(
+            v2.breaking_changes
+                .contains(&"enhanced_script_engine".to_string())
+        );
     }
 
     #[test]

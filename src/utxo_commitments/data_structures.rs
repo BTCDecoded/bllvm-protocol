@@ -143,22 +143,22 @@ impl std::fmt::Display for UtxoCommitmentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             UtxoCommitmentError::InvalidSize(size) => {
-                write!(f, "Invalid commitment size: {} (expected 88)", size)
+                write!(f, "Invalid commitment size: {size} (expected 88)")
             }
             UtxoCommitmentError::MerkleTreeError(msg) => {
-                write!(f, "Merkle tree error: {}", msg)
+                write!(f, "Merkle tree error: {msg}")
             }
             UtxoCommitmentError::InvalidUtxo(msg) => {
-                write!(f, "Invalid UTXO: {}", msg)
+                write!(f, "Invalid UTXO: {msg}")
             }
             UtxoCommitmentError::VerificationFailed(msg) => {
-                write!(f, "Verification failed: {}", msg)
+                write!(f, "Verification failed: {msg}")
             }
             UtxoCommitmentError::SerializationError(msg) => {
-                write!(f, "Serialization error: {}", msg)
+                write!(f, "Serialization error: {msg}")
             }
             UtxoCommitmentError::TransactionApplication(msg) => {
-                write!(f, "Transaction application error: {}", msg)
+                write!(f, "Transaction application error: {msg}")
             }
         }
     }

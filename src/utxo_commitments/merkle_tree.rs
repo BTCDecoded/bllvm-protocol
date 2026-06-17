@@ -18,7 +18,7 @@ use sparse_merkle_tree::default_store::DefaultStore;
 #[cfg(feature = "utxo-commitments")]
 use sparse_merkle_tree::traits::{Hasher, Value};
 #[cfg(feature = "utxo-commitments")]
-use sparse_merkle_tree::{SparseMerkleTree, H256};
+use sparse_merkle_tree::{H256, SparseMerkleTree};
 #[cfg(feature = "utxo-commitments")]
 use std::collections::HashMap;
 
@@ -37,7 +37,7 @@ impl Hasher for UtxoHasher {
     }
 
     fn write_byte(&mut self, b: u8) {
-        self.hasher.update(&[b]);
+        self.hasher.update([b]);
     }
 
     fn finish(self) -> H256 {
@@ -90,7 +90,7 @@ impl UtxoMerkleTree {
     pub fn new() -> UtxoCommitmentResult<Self> {
         let store = DefaultStore::default();
         let tree = SparseMerkleTree::new_with_store(store).map_err(|e| {
-            UtxoCommitmentError::MerkleTreeError(format!("Failed to create tree: {:?}", e))
+            UtxoCommitmentError::MerkleTreeError(format!("Failed to create tree: {e:?}"))
         })?;
 
         Ok(Self {
@@ -122,7 +122,7 @@ impl UtxoMerkleTree {
         let root_h256 = self
             .tree
             .update(key, utxo_value)
-            .map_err(|e| UtxoCommitmentError::MerkleTreeError(format!("Update failed: {:?}", e)))?;
+            .map_err(|e| UtxoCommitmentError::MerkleTreeError(format!("Update failed: {e:?}")))?;
 
         // Update tracking with checked arithmetic
         let old_supply = self.total_supply;
@@ -162,7 +162,7 @@ impl UtxoMerkleTree {
         let root_h256 = self
             .tree
             .update(key, zero_value)
-            .map_err(|e| UtxoCommitmentError::MerkleTreeError(format!("Remove failed: {:?}", e)))?;
+            .map_err(|e| UtxoCommitmentError::MerkleTreeError(format!("Remove failed: {e:?}")))?;
 
         // Update tracking with checked arithmetic
         let old_supply = self.total_supply;
@@ -185,20 +185,6 @@ impl UtxoMerkleTree {
             "UTXO count ({}) must be <= previous count ({})",
             self.utxo_count,
             old_count
-        );
-
-        // Runtime assertion: Supply and count must be non-negative
-        debug_assert!(
-            // total_supply is u64, so this check is always true - removed
-            true,
-            "Total supply ({}) must be within u64 bounds",
-            self.total_supply
-        );
-        debug_assert!(
-            // utxo_count is u64, so this check is always true - removed
-            true,
-            "UTXO count ({}) must be within u64 bounds",
-            self.utxo_count
         );
 
         // Convert H256 to Hash
@@ -227,8 +213,7 @@ impl UtxoMerkleTree {
                         Err(e) => {
                             // Deserialization failed - this might indicate corrupted data
                             Err(UtxoCommitmentError::InvalidUtxo(format!(
-                                "Failed to deserialize UTXO: {}",
-                                e
+                                "Failed to deserialize UTXO: {e}"
                             )))
                         }
                     }
@@ -274,7 +259,7 @@ impl UtxoMerkleTree {
         let keys = vec![key];
 
         self.tree.merkle_proof(keys).map_err(|e| {
-            UtxoCommitmentError::MerkleTreeError(format!("Failed to generate proof: {:?}", e))
+            UtxoCommitmentError::MerkleTreeError(format!("Failed to generate proof: {e:?}"))
         })
     }
 
@@ -406,8 +391,7 @@ impl UtxoMerkleTree {
                 }
                 _ => {
                     return Err(UtxoCommitmentError::MerkleTreeError(format!(
-                        "invalid proof tag: {}",
-                        tag
+                        "invalid proof tag: {tag}"
                     )));
                 }
             }
@@ -448,7 +432,7 @@ impl UtxoMerkleTree {
     pub fn from_utxo_set(utxo_set: &crate::types::UtxoSet) -> UtxoCommitmentResult<Self> {
         let mut tree = Self::new()?;
         for (outpoint, utxo) in utxo_set {
-            tree.insert(outpoint.clone(), utxo.as_ref().clone())?;
+            tree.insert(*outpoint, utxo.as_ref().clone())?;
         }
         Ok(tree)
     }
@@ -486,7 +470,7 @@ impl UtxoMerkleTree {
                     if let Some(old_utxo) = old_utxo_set.get(outpoint) {
                         self.remove(outpoint, old_utxo.as_ref())?;
                     }
-                    self.insert(outpoint.clone(), new_utxo.as_ref().clone())?;
+                    self.insert(*outpoint, new_utxo.as_ref().clone())?;
                 }
             }
         }
@@ -557,10 +541,7 @@ impl UtxoMerkleTree {
         let is_valid = proof
             .verify::<UtxoHasher>(&root_h256, leaves)
             .map_err(|e| {
-                UtxoCommitmentError::VerificationFailed(format!(
-                    "Proof verification failed: {:?}",
-                    e
-                ))
+                UtxoCommitmentError::VerificationFailed(format!("Proof verification failed: {e:?}"))
             })?;
 
         Ok(is_valid)
@@ -578,8 +559,8 @@ impl UtxoMerkleTree {
     /// This is used by both instance methods and the static verify function.
     fn hash_outpoint_static(outpoint: &OutPoint) -> H256 {
         let mut hasher = Sha256::new();
-        hasher.update(&outpoint.hash);
-        hasher.update(&outpoint.index.to_be_bytes());
+        hasher.update(outpoint.hash);
+        hasher.update(outpoint.index.to_be_bytes());
         let hash = hasher.finalize();
         let mut bytes = [0u8; 32];
         bytes.copy_from_slice(&hash);
@@ -663,8 +644,7 @@ impl Default for UtxoMerkleTree {
     fn default() -> Self {
         Self::new().unwrap_or_else(|e| {
             panic!(
-                "Failed to create default UtxoMerkleTree: {:?}. This indicates a critical system error.",
-                e
+                "Failed to create default UtxoMerkleTree: {e:?}. This indicates a critical system error."
             )
         })
     }

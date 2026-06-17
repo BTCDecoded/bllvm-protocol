@@ -3,10 +3,10 @@
 //! Tests for feature activation tracking and protocol version compatibility.
 
 use blvm_consensus::{SEGWIT_ACTIVATION_MAINNET, TAPROOT_ACTIVATION_MAINNET};
+use blvm_protocol::ProtocolVersion;
 use blvm_protocol::features::{
     ActivationMethod, FeatureActivation, FeatureContext, FeatureRegistry,
 };
-use blvm_protocol::ProtocolVersion;
 
 /// Test helper: Create a SegWit feature activation
 fn create_segwit_activation() -> FeatureActivation {

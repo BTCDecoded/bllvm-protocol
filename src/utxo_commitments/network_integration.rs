@@ -146,7 +146,7 @@ fn compute_block_hash(header: &BlockHeader) -> HashType {
     bytes.extend_from_slice(&header.nonce.to_le_bytes());
 
     let first_hash = Sha256::digest(&bytes);
-    let second_hash = Sha256::digest(&first_hash);
+    let second_hash = Sha256::digest(first_hash);
 
     let mut hash = [0u8; 32];
     hash.copy_from_slice(&second_hash);

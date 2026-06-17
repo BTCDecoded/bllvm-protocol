@@ -194,9 +194,7 @@ impl PeerConsensus {
             // Runtime assertion: Verify median bounds
             debug_assert!(
                 lower <= upper,
-                "Lower median value ({}) must be <= upper ({})",
-                lower,
-                upper
+                "Lower median value ({lower}) must be <= upper ({upper})"
             );
 
             // Use checked arithmetic to prevent overflow
@@ -210,10 +208,7 @@ impl PeerConsensus {
         if let (Some(&min_tip), Some(&max_tip)) = (sorted_tips.first(), sorted_tips.last()) {
             debug_assert!(
                 median_tip >= min_tip && median_tip <= max_tip,
-                "Median ({}) must be between min ({}) and max ({})",
-                median_tip,
-                min_tip,
-                max_tip
+                "Median ({median_tip}) must be between min ({min_tip}) and max ({max_tip})"
             );
         }
 
@@ -224,9 +219,7 @@ impl PeerConsensus {
             // Runtime assertion: Checkpoint is non-negative and <= median
             debug_assert!(
                 checkpoint <= median_tip,
-                "Checkpoint ({}) must be <= median ({})",
-                checkpoint,
-                median_tip
+                "Checkpoint ({checkpoint}) must be <= median ({median_tip})"
             );
 
             checkpoint
@@ -301,12 +294,13 @@ impl PeerConsensus {
             );
             commitment_groups
                 .entry(key)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(peer_commitment);
         }
 
         // Find group with highest agreement
-        let mut best_group: Option<(&(Hash, u64, u64, Natural), Vec<PeerCommitment>)> = None;
+        type CommitmentKey = (Hash, u64, u64, Natural);
+        let mut best_group: Option<(&CommitmentKey, Vec<PeerCommitment>)> = None;
         let mut best_agreement_count = 0;
 
         for (key, group) in commitment_groups.iter() {
@@ -342,9 +336,7 @@ impl PeerConsensus {
         // Runtime assertion: Verify mathematical invariants
         debug_assert!(
             required_agreement_count <= total_peers,
-            "Required agreement count ({}) cannot exceed total peers ({})",
-            required_agreement_count,
-            total_peers
+            "Required agreement count ({required_agreement_count}) cannot exceed total peers ({total_peers})"
         );
         debug_assert!(
             required_agreement_count >= 1,
@@ -352,9 +344,7 @@ impl PeerConsensus {
         );
         debug_assert!(
             best_agreement_count <= total_peers,
-            "Best agreement count ({}) cannot exceed total peers ({})",
-            best_agreement_count,
-            total_peers
+            "Best agreement count ({best_agreement_count}) cannot exceed total peers ({total_peers})"
         );
 
         if best_agreement_count < required_agreement_count {
@@ -377,9 +367,7 @@ impl PeerConsensus {
         // Runtime assertion: Verify consensus result invariants
         debug_assert!(
             agreement_count >= required_agreement_count,
-            "Agreement count ({}) must meet threshold ({})",
-            agreement_count,
-            required_agreement_count
+            "Agreement count ({agreement_count}) must meet threshold ({required_agreement_count})"
         );
         debug_assert!(
             agreement_ratio >= self.config.consensus_threshold,
@@ -389,14 +377,11 @@ impl PeerConsensus {
         );
         debug_assert!(
             agreement_count <= total_peers,
-            "Agreement count ({}) cannot exceed total peers ({})",
-            agreement_count,
-            total_peers
+            "Agreement count ({agreement_count}) cannot exceed total peers ({total_peers})"
         );
         debug_assert!(
-            agreement_ratio >= 0.0 && agreement_ratio <= 1.0,
-            "Agreement ratio ({:.4}) must be in [0, 1]",
-            agreement_ratio
+            (0.0..=1.0).contains(&agreement_ratio),
+            "Agreement ratio ({agreement_ratio:.4}) must be in [0, 1]"
         );
 
         Ok(ConsensusResult {
@@ -494,8 +479,7 @@ impl PeerConsensus {
 
             if !is_valid {
                 return Err(UtxoCommitmentError::VerificationFailed(format!(
-                    "UTXO proof verification failed for outpoint {:?} - possible attack",
-                    outpoint
+                    "UTXO proof verification failed for outpoint {outpoint:?} - possible attack"
                 )));
             }
         }
@@ -546,8 +530,7 @@ impl PeerConsensus {
                 Ok(true) => continue,
                 Ok(false) | Err(_) => {
                     return Err(UtxoCommitmentError::VerificationFailed(format!(
-                        "UTXO proof verification failed at index {} - possible attack",
-                        i
+                        "UTXO proof verification failed at index {i} - possible attack"
                     )));
                 }
             }
@@ -584,7 +567,7 @@ fn compute_block_hash(header: &BlockHeader) -> Hash {
 
     // Double SHA256
     let first_hash = Sha256::digest(&bytes);
-    let second_hash = Sha256::digest(&first_hash);
+    let second_hash = Sha256::digest(first_hash);
 
     let mut hash = [0u8; 32];
     hash.copy_from_slice(&second_hash);

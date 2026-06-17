@@ -6,7 +6,7 @@ use blvm_protocol::config::{
     CommonsExtensionsConfig, CompactBlockConfig, FeeRateConfig, ProtocolConfig,
     ProtocolFeaturesConfig, ProtocolValidationConfig, ServiceFlagsConfig,
 };
-use blvm_protocol::{service_flags, ProtocolVersion};
+use blvm_protocol::{ProtocolVersion, service_flags};
 
 /// [`MempoolConfig`] comes from consensus (which re-exports primitives in-tree). On crates.io the
 /// resolver can treat consensus vs primitives as separate nominal types; compare JSON defaults so

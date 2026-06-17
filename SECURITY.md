@@ -4,7 +4,7 @@ This document covers repo-specific security boundaries. See the [BTCDecoded Secu
 
 ## Supported Versions
 
-Security updates are provided for supported protocol versions. See the [CHANGELOG.md](CHANGELOG.md) for version history and support status.
+Security updates are provided for supported protocol versions. See [GitHub Releases](https://github.com/BTCDecoded/blvm-protocol/releases) and `Cargo.toml` for version history.
 
 ## Reporting a Vulnerability
 

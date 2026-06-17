@@ -105,8 +105,10 @@ impl BitcoinAddress {
 
         // Combine witness version and program as u5 values
         // Witness version needs to be converted to u5 (it's 0-16, fits in u5)
-        let mut data = vec![bech32::u5::try_from_u8(self.witness_version)
-            .map_err(|_| AddressError::InvalidWitnessVersion)?];
+        let mut data = vec![
+            bech32::u5::try_from_u8(self.witness_version)
+                .map_err(|_| AddressError::InvalidWitnessVersion)?,
+        ];
         data.extend_from_slice(&program_base32);
 
         // Encode using appropriate variant

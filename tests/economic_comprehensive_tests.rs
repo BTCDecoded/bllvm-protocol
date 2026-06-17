@@ -3,8 +3,8 @@
 //! Additional tests for economic parameters covering edge cases,
 //! boundary conditions, and comprehensive halving scenarios.
 
-use blvm_protocol::economic::EconomicParameters;
 use blvm_protocol::ProtocolVersion;
+use blvm_protocol::economic::EconomicParameters;
 
 #[test]
 fn test_subsidy_all_halvings() {

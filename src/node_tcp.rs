@@ -1009,7 +1009,7 @@ impl TcpFramedParser {
             ProtocolMessage::GetModuleList(msg) => (cmd::GETMODULELIST, bincode::serialize(msg)?),
             ProtocolMessage::ModuleList(msg) => (cmd::MODULELIST, bincode::serialize(msg)?),
             ProtocolMessage::MeshPacket(_) => {
-                return Err(anyhow::anyhow!("MeshPacket handled separately"))
+                return Err(anyhow::anyhow!("MeshPacket handled separately"));
             }
             #[cfg(feature = "erlay")]
             ProtocolMessage::SendTxRcncl(msg) => (cmd::SENDTXRCNCL, bincode::serialize(msg)?),

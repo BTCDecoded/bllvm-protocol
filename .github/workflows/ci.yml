@@ -201,7 +201,7 @@ jobs:
         run: |
           if ! cargo clippy --version >/dev/null 2>&1; then
             echo "Skipping Clippy (cargo-clippy not installed for the active toolchain)"
-            exit 0
+            exit 1
           fi
           cargo clippy --lib --bins -- -D warnings
 

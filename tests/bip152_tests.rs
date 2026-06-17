@@ -6,9 +6,8 @@
 
 use blvm_consensus::{Block, BlockHeader, Hash, Transaction, TransactionInput, TransactionOutput};
 use blvm_protocol::network::{
-    process_network_message, BlockTxnMessage, ChainStateAccess, CmpctBlockMessage,
-    GetBlockTxnMessage, NetworkMessage, NetworkResponse, PeerState, PrefilledTransaction,
-    SendCmpctMessage,
+    BlockTxnMessage, ChainStateAccess, CmpctBlockMessage, GetBlockTxnMessage, NetworkMessage,
+    NetworkResponse, PeerState, PrefilledTransaction, SendCmpctMessage, process_network_message,
 };
 use blvm_protocol::{BitcoinProtocolEngine, ProtocolVersion};
 use sha2::{Digest, Sha256};

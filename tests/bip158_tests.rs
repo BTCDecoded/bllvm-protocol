@@ -6,7 +6,7 @@
 use blvm_consensus::types::OutPoint;
 use blvm_consensus::{Transaction, TransactionInput, TransactionOutput};
 use blvm_protocol::bip158::{
-    build_block_filter, match_filter, CompactBlockFilter, BIP158_M, BIP158_P,
+    BIP158_M, BIP158_P, CompactBlockFilter, build_block_filter, match_filter,
 };
 
 /// Test helper: Create a simple transaction with outputs

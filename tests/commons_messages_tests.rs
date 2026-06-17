@@ -14,7 +14,7 @@ use blvm_protocol::commons::{
     FilterPreferences, FilteredBlockMessage, GetFilteredBlockMessage, GetUTXOSetMessage,
     SpamSummary, UTXOCommitment, UTXOSetMessage,
 };
-use blvm_protocol::network::{process_network_message, NetworkMessage, NetworkResponse, PeerState};
+use blvm_protocol::network::{NetworkMessage, NetworkResponse, PeerState, process_network_message};
 use blvm_protocol::{BitcoinProtocolEngine, ProtocolVersion};
 
 fn create_test_engine() -> BitcoinProtocolEngine {

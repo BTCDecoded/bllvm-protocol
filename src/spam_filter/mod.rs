@@ -20,7 +20,7 @@
 
 mod script_analyzer;
 
-pub use script_analyzer::{detect_input_script_type, ScriptType};
+pub use script_analyzer::{ScriptType, detect_input_script_type};
 
 use blvm_consensus::opcodes::*;
 use blvm_consensus::segwit::Witness;
@@ -899,11 +899,7 @@ impl SpamFilter {
         let fee = input_total.saturating_sub(output_total);
 
         // Fee rate in satoshis per vbyte
-        if tx_size > 0 {
-            fee / tx_size as u64
-        } else {
-            0
-        }
+        if tx_size > 0 { fee / tx_size as u64 } else { 0 }
     }
 
     /// Calculate fee rate using heuristics (fallback)

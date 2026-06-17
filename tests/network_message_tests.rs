@@ -5,9 +5,9 @@
 
 use blvm_consensus::{Block, BlockHeader, Hash, Transaction};
 use blvm_protocol::network::{
-    process_network_message, AddrMessage, ChainStateAccess, FeeFilterMessage, GetBlocksMessage,
-    GetDataMessage, HeadersMessage, InvMessage, NetworkAddress, NetworkMessage, NetworkResponse,
-    NotFoundMessage, PeerState, PingMessage, PongMessage, RejectMessage, VersionMessage,
+    AddrMessage, ChainStateAccess, FeeFilterMessage, GetBlocksMessage, GetDataMessage,
+    HeadersMessage, InvMessage, NetworkAddress, NetworkMessage, NetworkResponse, NotFoundMessage,
+    PeerState, PingMessage, PongMessage, RejectMessage, VersionMessage, process_network_message,
 };
 use blvm_protocol::{BitcoinProtocolEngine, ProtocolVersion};
 use std::collections::HashMap;

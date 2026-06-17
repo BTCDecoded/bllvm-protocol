@@ -117,7 +117,6 @@ impl From<ConsensusConfig> for ConsensusConfigSerializable {
     }
 }
 
-/// Serializable version of SpamFilterConfig
 // SpamFilterConfigSerializable moved to spam_filter module
 
 impl Default for UtxoCommitmentsConfig {
@@ -143,17 +142,17 @@ impl UtxoCommitmentsConfig {
     /// Load configuration from JSON file
     pub fn from_json_file(path: &std::path::Path) -> Result<Self, String> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read config file: {}", e))?;
+            .map_err(|e| format!("Failed to read config file: {e}"))?;
 
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config JSON: {}", e))
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config JSON: {e}"))
     }
 
     /// Save configuration to JSON file
     pub fn to_json_file(&self, path: &std::path::Path) -> Result<(), String> {
         let content = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("Failed to serialize config: {}", e))?;
+            .map_err(|e| format!("Failed to serialize config: {e}"))?;
 
-        std::fs::write(path, content).map_err(|e| format!("Failed to write config file: {}", e))
+        std::fs::write(path, content).map_err(|e| format!("Failed to write config file: {e}"))
     }
 
     /// Create default configuration file template
