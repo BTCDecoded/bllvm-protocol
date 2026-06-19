@@ -10,7 +10,7 @@ fn test_all_variants_list() {
     // Test that all variants are returned
     let variants = ProtocolVariant::all_variants();
 
-    assert_eq!(variants.len(), 3);
+    assert_eq!(variants.len(), 4);
     assert!(
         variants
             .iter()
@@ -20,6 +20,11 @@ fn test_all_variants_list() {
         variants
             .iter()
             .any(|v| v.version == ProtocolVersion::Testnet3)
+    );
+    assert!(
+        variants
+            .iter()
+            .any(|v| v.version == ProtocolVersion::Signet)
     );
     assert!(
         variants
@@ -43,6 +48,12 @@ fn test_variant_for_version() {
     assert_eq!(testnet_variant.version, ProtocolVersion::Testnet3);
     assert!(!testnet_variant.is_production);
 
+    let signet = ProtocolVariant::for_version(ProtocolVersion::Signet);
+    assert!(signet.is_some());
+    let signet_variant = signet.as_ref().unwrap();
+    assert_eq!(signet_variant.version, ProtocolVersion::Signet);
+    assert!(!signet_variant.is_production);
+
     let regtest = ProtocolVariant::for_version(ProtocolVersion::Regtest);
     assert!(regtest.is_some());
     let regtest_variant = regtest.as_ref().unwrap();
@@ -58,6 +69,9 @@ fn test_variant_production_ready() {
 
     let testnet = ProtocolVariant::for_version(ProtocolVersion::Testnet3).unwrap();
     assert!(!testnet.is_production_ready());
+
+    let signet = ProtocolVariant::for_version(ProtocolVersion::Signet).unwrap();
+    assert!(!signet.is_production_ready());
 
     let regtest = ProtocolVariant::for_version(ProtocolVersion::Regtest).unwrap();
     assert!(!regtest.is_production_ready());

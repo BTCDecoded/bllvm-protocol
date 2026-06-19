@@ -36,6 +36,7 @@ impl EconomicParameters {
             ProtocolVersion::BitcoinV1 => Self::mainnet(),
             ProtocolVersion::Testnet3 => Self::testnet(),
             ProtocolVersion::Regtest => Self::regtest(),
+            ProtocolVersion::Signet => Self::signet(),
         }
     }
 
@@ -80,6 +81,21 @@ impl EconomicParameters {
             min_fee_rate: 0, // No minimum fee for testing
             max_fee_rate: 1_000_000,
             min_relay_fee: 0, // No minimum relay fee for testing
+            subsidy_schedule: Vec::new(),
+        }
+    }
+
+    /// Signet economic parameters (same halving schedule as mainnet)
+    pub fn signet() -> Self {
+        Self {
+            initial_subsidy: 50_0000_0000,
+            halving_interval: 210_000,
+            max_money_supply: 21_0000_0000_0000_0000,
+            coinbase_maturity: 100,
+            dust_limit: 546,
+            min_fee_rate: 1,
+            max_fee_rate: 1_000_000,
+            min_relay_fee: 1000,
             subsidy_schedule: Vec::new(),
         }
     }

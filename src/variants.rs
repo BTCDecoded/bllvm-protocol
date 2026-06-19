@@ -47,6 +47,14 @@ impl ProtocolVariant {
                 supports_mining: true,
                 supports_wallet: true,
             },
+            ProtocolVariant {
+                version: ProtocolVersion::Signet,
+                name: "Bitcoin Signet".to_string(),
+                description: "Signet test network with BIP325 block-solution challenge".to_string(),
+                is_production: false,
+                supports_mining: true,
+                supports_wallet: true,
+            },
         ]
     }
 
@@ -140,12 +148,16 @@ mod tests {
     #[test]
     fn test_protocol_variants() {
         let variants = ProtocolVariant::all_variants();
-        assert_eq!(variants.len(), 3);
+        assert_eq!(variants.len(), 4);
 
         let mainnet = ProtocolVariant::for_version(ProtocolVersion::BitcoinV1).unwrap();
         assert_eq!(mainnet.name, "Bitcoin Mainnet");
         assert!(mainnet.is_production_ready());
         assert!(mainnet.supports_mining_operations());
+
+        let signet = ProtocolVariant::for_version(ProtocolVersion::Signet).unwrap();
+        assert_eq!(signet.name, "Bitcoin Signet");
+        assert!(!signet.is_production_ready());
 
         let regtest = ProtocolVariant::for_version(ProtocolVersion::Regtest).unwrap();
         assert_eq!(regtest.name, "Bitcoin Regtest");

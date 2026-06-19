@@ -43,6 +43,7 @@ impl ProtocolValidationRules {
             ProtocolVersion::BitcoinV1 => Self::mainnet(),
             ProtocolVersion::Testnet3 => Self::testnet(),
             ProtocolVersion::Regtest => Self::regtest(),
+            ProtocolVersion::Signet => Self::signet(),
         }
     }
 
@@ -84,6 +85,20 @@ impl ProtocolValidationRules {
             taproot_enabled: true,
             rbf_enabled: true,
             min_fee_rate: 0, // No minimum fee for testing
+            max_fee_rate: 1_000_000,
+        }
+    }
+
+    /// Signet validation rules (production-like test network)
+    pub fn signet() -> Self {
+        Self {
+            max_block_size: 4_000_000,
+            max_tx_size: 1_000_000,
+            max_script_size: 10_000,
+            segwit_enabled: true,
+            taproot_enabled: true,
+            rbf_enabled: true,
+            min_fee_rate: 1,
             max_fee_rate: 1_000_000,
         }
     }

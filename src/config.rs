@@ -406,6 +406,7 @@ impl ProtocolConfig {
             config.protocol_version = match val.as_str() {
                 "Testnet3" | "testnet" => ProtocolVersion::Testnet3,
                 "Regtest" | "regtest" => ProtocolVersion::Regtest,
+                "Signet" | "signet" => ProtocolVersion::Signet,
                 _ => ProtocolVersion::BitcoinV1,
             };
         }

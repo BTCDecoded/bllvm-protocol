@@ -275,6 +275,20 @@ pub enum ProtocolVersion {
     Testnet3,
     /// Regression test network protocol
     Regtest,
+    /// Signet test network (BIP325 block-solution challenge)
+    Signet,
+}
+
+impl ProtocolVersion {
+    /// Map protocol variant to consensus `Network` (blvm-primitives / blvm-consensus).
+    pub fn consensus_network(self) -> types::Network {
+        match self {
+            ProtocolVersion::BitcoinV1 => types::Network::Mainnet,
+            ProtocolVersion::Testnet3 => types::Network::Testnet,
+            ProtocolVersion::Regtest => types::Network::Regtest,
+            ProtocolVersion::Signet => types::Network::Signet,
+        }
+    }
 }
 
 /// Network parameters for different Bitcoin variants
@@ -294,6 +308,9 @@ pub struct NetworkParameters {
     pub network_name: String,
     /// Whether this is a test network
     pub is_testnet: bool,
+    /// Optional BIP325 signet challenge script override (hex-decoded bytes stored here).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signet_challenge: Option<ByteString>,
 }
 
 impl BitcoinProtocolEngine {
@@ -335,6 +352,27 @@ impl BitcoinProtocolEngine {
         &self.network_params
     }
 
+    /// Override the BIP325 signet challenge script (custom signet networks).
+    pub fn with_signet_challenge(mut self, script: Option<Vec<u8>>) -> Self {
+        self.network_params.signet_challenge = script;
+        self
+    }
+
+    /// Build consensus [`BlockValidationContext`] including signet challenge from network params.
+    pub fn connect_block_validation_context<H: AsRef<BlockHeader>>(
+        &self,
+        recent_headers: Option<&[H]>,
+        network_time: u64,
+    ) -> block::BlockValidationContext {
+        let mut ctx = block::block_validation_context_for_connect_ibd(
+            recent_headers,
+            network_time,
+            self.protocol_version.consensus_network(),
+        );
+        ctx.signet_challenge = self.network_params.signet_challenge.clone();
+        ctx
+    }
+
     /// Validate a block using this protocol's rules.
     ///
     /// **Deprecated**: this API builds empty witness vectors for every input and passes
@@ -356,11 +394,7 @@ impl BitcoinProtocolEngine {
         utxos: &UtxoSet,
         height: u64,
     ) -> Result<ValidationResult> {
-        let network = match self.protocol_version {
-            ProtocolVersion::BitcoinV1 => types::Network::Mainnet,
-            ProtocolVersion::Testnet3 => types::Network::Testnet,
-            ProtocolVersion::Regtest => types::Network::Regtest,
-        };
+        let network = self.protocol_version.consensus_network();
         // Empty witnesses: SegWit/Taproot inputs will fail witness-dependent checks.
         // This is acceptable here only because callers of this deprecated API either
         // use pre-SegWit blocks or do not need full witness validation.
@@ -478,18 +512,8 @@ impl BitcoinProtocolEngine {
         }
 
         // Then, consensus validation with UTXO update
-        // Convert protocol version to network type
-        let network = match self.protocol_version {
-            ProtocolVersion::BitcoinV1 => types::Network::Mainnet,
-            ProtocolVersion::Testnet3 => types::Network::Testnet,
-            ProtocolVersion::Regtest => types::Network::Regtest,
-        };
         let network_time = crate::time::current_timestamp();
-        let context = crate::block::block_validation_context_for_connect_ibd(
-            recent_headers,
-            network_time,
-            network,
-        );
+        let context = self.connect_block_validation_context(recent_headers, network_time);
         let (result, new_utxo_set, _undo_log) = blvm_consensus::block::connect_block(
             block,
             witnesses,
@@ -515,6 +539,9 @@ impl BitcoinProtocolEngine {
                     feature,
                     "segwit" | "taproot" | "rbf" | "ctv" | "fast_mining"
                 )
+            }
+            ProtocolVersion::Signet => {
+                matches!(feature, "segwit" | "taproot" | "rbf" | "ctv" | "signet")
             }
         }
     }
@@ -550,6 +577,7 @@ impl NetworkParameters {
             ProtocolVersion::BitcoinV1 => Self::mainnet(),
             ProtocolVersion::Testnet3 => Self::testnet(),
             ProtocolVersion::Regtest => Self::regtest(),
+            ProtocolVersion::Signet => Self::signet(),
         }
     }
 
@@ -563,6 +591,7 @@ impl NetworkParameters {
             halving_interval: 210000,
             network_name: "mainnet".to_string(),
             is_testnet: false,
+            signet_challenge: None,
         })
     }
 
@@ -576,6 +605,7 @@ impl NetworkParameters {
             halving_interval: 210000,
             network_name: "testnet".to_string(),
             is_testnet: true,
+            signet_challenge: None,
         })
     }
 
@@ -589,6 +619,21 @@ impl NetworkParameters {
             halving_interval: 150,  // Faster halving for testing
             network_name: "regtest".to_string(),
             is_testnet: true,
+            signet_challenge: None,
+        })
+    }
+
+    /// Bitcoin signet parameters (BIP325 default signet)
+    pub fn signet() -> Result<Self> {
+        Ok(NetworkParameters {
+            magic_bytes: [0x0f, 0x1b, 0xf2, 0xe1],
+            default_port: 38333,
+            genesis_block: genesis::signet_genesis(),
+            max_target: 0x1e0377ae,
+            halving_interval: 210_000,
+            network_name: "signet".to_string(),
+            is_testnet: true,
+            signet_challenge: None,
         })
     }
 }
@@ -624,6 +669,13 @@ mod tests {
         assert_eq!(regtest.get_protocol_version(), ProtocolVersion::Regtest);
         assert_eq!(regtest.get_network_params().network_name, "regtest");
         assert!(regtest.get_network_params().is_testnet);
+
+        // Test signet
+        let signet = BitcoinProtocolEngine::new(ProtocolVersion::Signet).unwrap();
+        assert_eq!(signet.get_protocol_version(), ProtocolVersion::Signet);
+        assert_eq!(signet.get_network_params().network_name, "signet");
+        assert!(signet.get_network_params().is_testnet);
+        assert_eq!(signet.get_network_params().default_port, 38333);
     }
 
     #[test]
@@ -682,6 +734,32 @@ mod tests {
         assert!(regtest.supports_feature("rbf"));
         assert!(regtest.supports_feature("ctv"));
         assert!(regtest.supports_feature("fast_mining"));
+
+        let signet = BitcoinProtocolEngine::new(ProtocolVersion::Signet).unwrap();
+        assert!(signet.supports_feature("segwit"));
+        assert!(signet.supports_feature("taproot"));
+        assert!(signet.supports_feature("signet"));
+        assert!(!signet.supports_feature("fast_mining"));
+    }
+
+    #[test]
+    fn test_signet_challenge_override_on_engine() {
+        let engine = BitcoinProtocolEngine::new(ProtocolVersion::Signet)
+            .unwrap()
+            .with_signet_challenge(Some(vec![0x51]));
+        assert_eq!(
+            engine
+                .get_network_params()
+                .signet_challenge
+                .as_ref()
+                .map(|b| b.as_ref()),
+            Some([0x51].as_slice())
+        );
+        let ctx = engine.connect_block_validation_context(None::<&[BlockHeader]>, 0);
+        assert_eq!(
+            ctx.signet_challenge.as_ref().map(|b| b.as_ref()),
+            Some([0x51].as_slice())
+        );
     }
 
     #[test]
@@ -841,6 +919,7 @@ mod tests {
             ProtocolVersion::BitcoinV1,
             ProtocolVersion::Testnet3,
             ProtocolVersion::Regtest,
+            ProtocolVersion::Signet,
         ];
 
         for version in versions {
@@ -878,6 +957,7 @@ mod tests {
             ProtocolVersion::BitcoinV1,
             ProtocolVersion::Testnet3,
             ProtocolVersion::Regtest,
+            ProtocolVersion::Signet,
         ];
 
         for version in versions {

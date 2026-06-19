@@ -48,6 +48,7 @@ impl NetworkConstants {
             ProtocolVersion::BitcoinV1 => Self::mainnet(),
             ProtocolVersion::Testnet3 => Self::testnet(),
             ProtocolVersion::Regtest => Self::regtest(),
+            ProtocolVersion::Signet => Self::signet(),
         }
     }
 
@@ -120,6 +121,28 @@ impl NetworkConstants {
         })
     }
 
+    /// Bitcoin signet constants (default public signet)
+    pub fn signet() -> Result<Self> {
+        Ok(Self {
+            magic_bytes: [0x0f, 0x1b, 0xf2, 0xe1],
+            default_port: 38333,
+            genesis_hash: [
+                0xf6, 0x1e, 0xee, 0x3b, 0x63, 0xa3, 0x80, 0xa4, 0x77, 0xa0, 0x63, 0xaf, 0x32, 0xb2,
+                0xbb, 0xc9, 0x7c, 0x9f, 0xf9, 0xf0, 0x1f, 0x2c, 0x42, 0x25, 0xe9, 0x73, 0x98, 0x81,
+                0x08, 0x00, 0x00, 0x00,
+            ],
+            max_target: 0x1e0377ae,
+            halving_interval: 210_000,
+            network_name: "signet".to_string(),
+            is_testnet: true,
+            dns_seeds: vec![
+                "seed.signet.bitcoin.sprovoost.nl".to_string(),
+                "seed.signet.achownodes.xyz".to_string(),
+            ],
+            checkpoints: vec![],
+        })
+    }
+
     /// Mainnet checkpoints for fast sync
     fn mainnet_checkpoints() -> Vec<Checkpoint> {
         vec![
@@ -156,14 +179,21 @@ impl NetworkConstants {
 impl NetworkParameters {
     /// Create network parameters from constants
     pub fn from_constants(constants: &NetworkConstants) -> Result<Self> {
+        let genesis_block = match constants.network_name.as_str() {
+            "testnet" => crate::genesis::testnet_genesis(),
+            "regtest" => crate::genesis::regtest_genesis(),
+            "signet" => crate::genesis::signet_genesis(),
+            _ => crate::genesis::mainnet_genesis(),
+        };
         Ok(NetworkParameters {
             magic_bytes: constants.magic_bytes,
             default_port: constants.default_port,
-            genesis_block: crate::genesis::mainnet_genesis(),
+            genesis_block,
             max_target: constants.max_target,
             halving_interval: constants.halving_interval,
             network_name: constants.network_name.clone(),
             is_testnet: constants.is_testnet,
+            signet_challenge: None,
         })
     }
 }
@@ -190,6 +220,12 @@ mod tests {
         assert_eq!(regtest.default_port, 18444);
         assert!(regtest.is_testnet);
         assert!(regtest.dns_seeds.is_empty());
+
+        let signet = NetworkConstants::signet().unwrap();
+        assert_eq!(signet.magic_bytes, [0x0f, 0x1b, 0xf2, 0xe1]);
+        assert_eq!(signet.default_port, 38333);
+        assert!(signet.is_testnet);
+        assert!(!signet.dns_seeds.is_empty());
     }
 
     #[test]
@@ -216,6 +252,10 @@ mod tests {
         let regtest = NetworkConstants::for_version(ProtocolVersion::Regtest).unwrap();
         assert_eq!(regtest.network_name, "regtest");
         assert!(regtest.is_testnet);
+
+        let signet = NetworkConstants::for_version(ProtocolVersion::Signet).unwrap();
+        assert_eq!(signet.network_name, "signet");
+        assert!(signet.is_testnet);
     }
 
     #[test]
@@ -228,6 +268,11 @@ mod tests {
         assert_ne!(mainnet.genesis_hash, testnet.genesis_hash);
         assert_ne!(testnet.genesis_hash, regtest.genesis_hash);
         assert_ne!(mainnet.genesis_hash, regtest.genesis_hash);
+
+        let signet = NetworkConstants::signet().unwrap();
+        assert_ne!(signet.genesis_hash, mainnet.genesis_hash);
+        assert_ne!(signet.genesis_hash, testnet.genesis_hash);
+        assert_ne!(signet.genesis_hash, regtest.genesis_hash);
 
         // Verify genesis hashes are not all zeros
         assert_ne!(mainnet.genesis_hash, [0u8; 32]);

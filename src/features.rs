@@ -95,6 +95,7 @@ impl FeatureRegistry {
             ProtocolVersion::BitcoinV1 => Self::mainnet(),
             ProtocolVersion::Testnet3 => Self::testnet(),
             ProtocolVersion::Regtest => Self::regtest(),
+            ProtocolVersion::Signet => Self::signet(),
         }
     }
 
@@ -251,6 +252,57 @@ impl FeatureRegistry {
                     activation_timestamp: None,
                     activation_method: ActivationMethod::AlwaysActive,
                     bip_number: None,
+                },
+            ],
+        }
+    }
+
+    /// Signet feature activations (Core signet: forks active from height 1)
+    pub fn signet() -> Self {
+        Self {
+            protocol_version: ProtocolVersion::Signet,
+            features: vec![
+                FeatureActivation {
+                    feature_name: "segwit".to_string(),
+                    activation_height: Some(1),
+                    activation_timestamp: None,
+                    activation_method: ActivationMethod::HeightBased,
+                    bip_number: Some(141),
+                },
+                FeatureActivation {
+                    feature_name: "taproot".to_string(),
+                    activation_height: Some(1),
+                    activation_timestamp: None,
+                    activation_method: ActivationMethod::HeightBased,
+                    bip_number: Some(341),
+                },
+                FeatureActivation {
+                    feature_name: "rbf".to_string(),
+                    activation_height: Some(0),
+                    activation_timestamp: None,
+                    activation_method: ActivationMethod::AlwaysActive,
+                    bip_number: Some(125),
+                },
+                FeatureActivation {
+                    feature_name: "csv".to_string(),
+                    activation_height: Some(1),
+                    activation_timestamp: None,
+                    activation_method: ActivationMethod::HeightBased,
+                    bip_number: Some(112),
+                },
+                FeatureActivation {
+                    feature_name: "cltv".to_string(),
+                    activation_height: Some(1),
+                    activation_timestamp: None,
+                    activation_method: ActivationMethod::HeightBased,
+                    bip_number: Some(65),
+                },
+                FeatureActivation {
+                    feature_name: "signet".to_string(),
+                    activation_height: Some(0),
+                    activation_timestamp: None,
+                    activation_method: ActivationMethod::AlwaysActive,
+                    bip_number: Some(325),
                 },
             ],
         }
