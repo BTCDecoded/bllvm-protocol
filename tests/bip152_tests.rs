@@ -17,17 +17,29 @@ use std::sync::Arc;
 /// Mock chain state for compact block testing
 struct MockChainForCompactBlocks {
     blocks: HashMap<Hash, Block>,
+    witnesses: HashMap<Hash, Vec<Vec<blvm_consensus::segwit::Witness>>>,
 }
 
 impl MockChainForCompactBlocks {
     fn new() -> Self {
         Self {
             blocks: HashMap::new(),
+            witnesses: HashMap::new(),
         }
     }
 
     fn add_block(&mut self, hash: Hash, block: Block) {
         self.blocks.insert(hash, block);
+    }
+
+    fn add_block_with_witnesses(
+        &mut self,
+        hash: Hash,
+        block: Block,
+        witnesses: Vec<Vec<blvm_consensus::segwit::Witness>>,
+    ) {
+        self.blocks.insert(hash, block);
+        self.witnesses.insert(hash, witnesses);
     }
 }
 
@@ -48,6 +60,13 @@ impl ChainStateAccess for MockChainForCompactBlocks {
 
     fn get_mempool_transactions(&self) -> Vec<Transaction> {
         vec![]
+    }
+
+    fn get_block_witnesses(
+        &self,
+        hash: &Hash,
+    ) -> Option<Vec<Vec<blvm_consensus::segwit::Witness>>> {
+        self.witnesses.get(hash).cloned()
     }
 }
 
@@ -156,6 +175,8 @@ fn test_sendcmpct_version_1() {
     .unwrap();
 
     assert!(matches!(response, NetworkResponse::Ok));
+    assert_eq!(peer_state.compact_block_version, Some(1));
+    assert!(peer_state.prefer_compact_block);
 }
 
 #[test]
@@ -265,8 +286,12 @@ fn test_cmpctblock_message_processing() {
     )
     .unwrap();
 
-    // Should acknowledge (actual reconstruction would happen in full implementation)
-    assert!(matches!(response, NetworkResponse::Ok));
+    match response {
+        NetworkResponse::Reject(reason) => {
+            assert!(reason.contains("Compact block reconstruction"));
+        }
+        other => panic!("Expected Reject, got {other:?}"),
+    }
 }
 
 #[test]
@@ -319,7 +344,12 @@ fn test_cmpctblock_with_prefilled_txs() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    match response {
+        NetworkResponse::Reject(reason) => {
+            assert!(reason.contains("Compact block reconstruction"));
+        }
+        other => panic!("Expected Reject, got {other:?}"),
+    }
 }
 
 // ============================================================================
@@ -355,6 +385,93 @@ fn test_getblocktxn_basic() {
             NetworkMessage::BlockTxn(blocktxn) => {
                 assert_eq!(blocktxn.block_hash, block_hash);
                 assert_eq!(blocktxn.transactions.len(), 3);
+            }
+            _ => panic!("Expected BlockTxn message"),
+        },
+        _ => panic!("Expected SendMessage with BlockTxn"),
+    }
+}
+
+#[test]
+fn test_getblocktxn_includes_stored_witnesses() {
+    let engine = create_test_engine();
+    let mut peer_state = PeerState::new();
+    let mut chain = MockChainForCompactBlocks::new();
+
+    let (block_hash, block) = create_test_block_with_txs(3);
+    let witnesses: Vec<Vec<blvm_consensus::segwit::Witness>> = block
+        .transactions
+        .iter()
+        .enumerate()
+        .map(|(i, tx)| tx.inputs.iter().map(|_| vec![vec![i as u8]]).collect())
+        .collect();
+    chain.add_block_with_witnesses(block_hash, block, witnesses.clone());
+
+    let getblocktxn = GetBlockTxnMessage {
+        block_hash,
+        indices: vec![1, 2],
+    };
+
+    let response = process_network_message(
+        &engine,
+        &NetworkMessage::GetBlockTxn(getblocktxn),
+        &mut peer_state,
+        Some(&chain),
+        None,
+        None,
+    )
+    .unwrap();
+
+    match response {
+        NetworkResponse::SendMessage(msg) => match *msg {
+            NetworkMessage::BlockTxn(blocktxn) => {
+                assert_eq!(blocktxn.transactions.len(), 2);
+                let w = blocktxn
+                    .witnesses
+                    .expect("stored block witnesses must be included in BlockTxn");
+                assert_eq!(w.len(), 2);
+                assert_eq!(w[0][0], vec![vec![1u8]]);
+                assert_eq!(w[1][0], vec![vec![2u8]]);
+            }
+            _ => panic!("Expected BlockTxn message"),
+        },
+        _ => panic!("Expected SendMessage with BlockTxn"),
+    }
+}
+
+#[test]
+fn test_getblocktxn_includes_synthesized_witnesses_when_not_stored() {
+    let engine = create_test_engine();
+    let mut peer_state = PeerState::new();
+    let mut chain = MockChainForCompactBlocks::new();
+
+    let (block_hash, block) = create_test_block_with_txs(2);
+    chain.add_block(block_hash, block);
+
+    let getblocktxn = GetBlockTxnMessage {
+        block_hash,
+        indices: vec![1],
+    };
+
+    let response = process_network_message(
+        &engine,
+        &NetworkMessage::GetBlockTxn(getblocktxn),
+        &mut peer_state,
+        Some(&chain),
+        None,
+        None,
+    )
+    .unwrap();
+
+    match response {
+        NetworkResponse::SendMessage(msg) => match *msg {
+            NetworkMessage::BlockTxn(blocktxn) => {
+                assert_eq!(blocktxn.transactions.len(), 1);
+                let w = blocktxn
+                    .witnesses
+                    .expect("BlockTxn must include per-tx witness stacks");
+                assert_eq!(w.len(), 1);
+                assert!(w[0].iter().all(|stack| stack.is_empty()));
             }
             _ => panic!("Expected BlockTxn message"),
         },
@@ -494,7 +611,12 @@ fn test_blocktxn_message_processing() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    match response {
+        NetworkResponse::Reject(reason) => {
+            assert!(reason.contains("Compact block reconstruction"));
+        }
+        other => panic!("Expected Reject, got {other:?}"),
+    }
 }
 
 // ============================================================================
@@ -530,7 +652,12 @@ fn test_cmpctblock_empty_short_ids() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    match response {
+        NetworkResponse::Reject(reason) => {
+            assert!(reason.contains("Compact block reconstruction"));
+        }
+        other => panic!("Expected Reject, got {other:?}"),
+    }
 }
 
 #[test]

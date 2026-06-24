@@ -16,8 +16,10 @@ use std::sync::Arc;
 /// Mock chain state access for testing
 struct MockChainStateAccess {
     blocks: HashMap<Hash, Block>,
+    block_witnesses: HashMap<Hash, Vec<Vec<blvm_consensus::segwit::Witness>>>,
     transactions: HashMap<Hash, Transaction>,
-    headers: Vec<BlockHeader>,
+    /// Main-chain order (height ascending).
+    chain: Vec<(Hash, BlockHeader)>,
     mempool: Vec<Transaction>,
 }
 
@@ -25,16 +27,29 @@ impl MockChainStateAccess {
     fn new() -> Self {
         Self {
             blocks: HashMap::new(),
+            block_witnesses: HashMap::new(),
             transactions: HashMap::new(),
-            headers: Vec::new(),
+            chain: Vec::new(),
             mempool: Vec::new(),
         }
+    }
+
+    fn add_block_with_witnesses(
+        &mut self,
+        hash: Hash,
+        block: Block,
+        witnesses: Vec<Vec<blvm_consensus::segwit::Witness>>,
+    ) {
+        let header = block.header.clone();
+        self.blocks.insert(hash, block);
+        self.block_witnesses.insert(hash, witnesses);
+        self.chain.push((hash, header));
     }
 
     fn add_block(&mut self, hash: Hash, block: Block) {
         let header = block.header.clone();
         self.blocks.insert(hash, block);
-        self.headers.push(header);
+        self.chain.push((hash, header));
     }
 
     fn add_transaction(&mut self, hash: Hash, tx: Transaction) {
@@ -65,12 +80,38 @@ impl ChainStateAccess for MockChainStateAccess {
         }
     }
 
-    fn get_headers_for_locator(&self, _locator: &[Hash], _stop: &Hash) -> Vec<BlockHeader> {
-        self.headers.clone()
+    fn get_headers_for_locator(&self, locator: &[Hash], stop: &Hash) -> Vec<BlockHeader> {
+        let fork_idx = if locator.is_empty() {
+            self.chain.first().map(|_| 0)
+        } else {
+            locator
+                .iter()
+                .find_map(|h| self.chain.iter().position(|(hash, _)| hash == h))
+        };
+        let Some(idx) = fork_idx else {
+            return Vec::new();
+        };
+        let start = idx + 1;
+        if start >= self.chain.len() {
+            return Vec::new();
+        }
+        let stop_all_zero = stop.iter().all(|&b| b == 0);
+        self.chain[start..]
+            .iter()
+            .take_while(|(hash, _)| stop_all_zero || hash != stop)
+            .map(|(_, hdr)| hdr.clone())
+            .collect()
     }
 
     fn get_mempool_transactions(&self) -> Vec<Transaction> {
         self.mempool.clone()
+    }
+
+    fn get_block_witnesses(
+        &self,
+        hash: &Hash,
+    ) -> Option<Vec<Vec<blvm_consensus::segwit::Witness>>> {
+        self.block_witnesses.get(hash).cloned()
     }
 }
 
@@ -424,6 +465,8 @@ fn test_process_getaddr_message() {
 
 #[test]
 fn test_process_getblocks_message() {
+    use blvm_consensus::block::block_header_hash;
+
     let engine = create_test_engine();
     let mut peer_state = create_test_peer_state();
     let mut chain_access = MockChainStateAccess::new();
@@ -459,11 +502,50 @@ fn test_process_getblocks_message() {
     )
     .unwrap();
 
-    // Should send inv message with found blocks
+    // Locator at tip → peer already synced; no inv entries.
+    match response {
+        NetworkResponse::Ok => {}
+        other => panic!("Expected Ok (peer at tip), got {other:?}"),
+    }
+
+    // Second block after fork: inv must list successor hash, not locator hits.
+    let hash2 = [2u8; 32];
+    let block2 = Block {
+        header: BlockHeader {
+            version: 1,
+            prev_block_hash: hash,
+            merkle_root: [2u8; 32],
+            timestamp: 1231006565,
+            bits: 0x1d00ffff,
+            nonce: 0,
+        },
+        transactions: vec![].into(),
+    };
+    chain_access.add_block(hash2, block2.clone());
+    let expected_hash = block_header_hash(&block2.header);
+
+    let getblocks = GetBlocksMessage {
+        version: 70015,
+        block_locator_hashes: vec![hash],
+        hash_stop: [0u8; 32],
+    };
+
+    let response = process_network_message(
+        &engine,
+        &NetworkMessage::GetBlocks(getblocks),
+        &mut peer_state,
+        Some(&chain_access),
+        None,
+        None,
+    )
+    .unwrap();
+
     match response {
         NetworkResponse::SendMessage(msg) => match *msg {
             NetworkMessage::Inv(inv) => {
-                assert!(!inv.inventory.is_empty());
+                assert_eq!(inv.inventory.len(), 1);
+                assert_eq!(inv.inventory[0].hash, expected_hash);
+                assert_eq!(inv.inventory[0].inv_type, 2);
             }
             _ => panic!("Expected Inv message"),
         },
@@ -626,6 +708,7 @@ fn test_process_sendheaders_message() {
     .unwrap();
 
     assert!(matches!(response, NetworkResponse::Ok));
+    assert!(peer_state.prefer_headers);
 }
 
 #[test]
@@ -732,6 +815,111 @@ fn test_process_getdata_message() {
         }
         _ => panic!("Expected SendMessages with Tx"),
     }
+}
+
+#[test]
+fn test_process_getdata_block_includes_stored_witnesses() {
+    let engine = create_test_engine();
+    let mut peer_state = create_test_peer_state();
+    let mut chain_access = MockChainStateAccess::new();
+    let hash = [2u8; 32];
+
+    use blvm_consensus::opcodes::OP_1;
+    use blvm_consensus::{TransactionInput, TransactionOutput, tx_inputs, tx_outputs};
+    let coinbase = Transaction {
+        version: 2,
+        inputs: tx_inputs![TransactionInput {
+            prevout: blvm_consensus::types::OutPoint {
+                hash: [0; 32],
+                index: 0xffffffff,
+            },
+            script_sig: vec![0x01, 0x00],
+            sequence: 0xffffffff,
+        }],
+        outputs: tx_outputs![TransactionOutput {
+            value: 5_000_000_000,
+            script_pubkey: vec![OP_1],
+        }],
+        lock_time: 0,
+    };
+    let block = Block {
+        header: BlockHeader {
+            version: 4,
+            prev_block_hash: [0; 32],
+            merkle_root: [1; 32],
+            timestamp: 1_231_006_505,
+            bits: 0x0300ffff,
+            nonce: 0,
+        },
+        transactions: vec![coinbase].into(),
+    };
+    let witnesses = vec![vec![vec![vec![0xab, 0xcd]]]];
+    chain_access.add_block_with_witnesses(hash, block, witnesses);
+
+    let getdata = GetDataMessage {
+        inventory: vec![blvm_protocol::network::InventoryVector { inv_type: 2, hash }],
+    };
+
+    let response = process_network_message(
+        &engine,
+        &NetworkMessage::GetData(getdata),
+        &mut peer_state,
+        Some(&chain_access),
+        None,
+        None,
+    )
+    .unwrap();
+
+    match response {
+        NetworkResponse::SendMessages(msgs) => match &msgs[0] {
+            NetworkMessage::Block(_, w) => {
+                assert_eq!(w.len(), 1);
+                assert_eq!(w[0][0][0], vec![0xab, 0xcd]);
+            }
+            other => panic!("Expected Block message, got {other:?}"),
+        },
+        other => panic!("Expected SendMessages, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_process_getdata_skips_block_without_stored_witnesses() {
+    let engine = create_test_engine();
+    let mut peer_state = create_test_peer_state();
+    let mut chain_access = MockChainStateAccess::new();
+    let hash = [3u8; 32];
+
+    let block = Block {
+        header: BlockHeader {
+            version: 1,
+            prev_block_hash: [0u8; 32],
+            merkle_root: [1u8; 32],
+            timestamp: 1231006505,
+            bits: 0x1d00ffff,
+            nonce: 0,
+        },
+        transactions: vec![].into(),
+    };
+    chain_access.add_block(hash, block);
+
+    let getdata = GetDataMessage {
+        inventory: vec![blvm_protocol::network::InventoryVector { inv_type: 2, hash }],
+    };
+
+    let response = process_network_message(
+        &engine,
+        &NetworkMessage::GetData(getdata),
+        &mut peer_state,
+        Some(&chain_access),
+        None,
+        None,
+    )
+    .unwrap();
+
+    assert!(
+        matches!(response, NetworkResponse::Ok),
+        "block without stored witnesses must not be relayed with synthesized empty stacks"
+    );
 }
 
 #[test]

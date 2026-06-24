@@ -252,7 +252,8 @@ impl BitcoinProtocolEngine {
             let witness_bytes: u64 = wit
                 .iter()
                 .flat_map(|tx_wit| tx_wit.iter())
-                .map(|w| w.len() as u64)
+                .flat_map(|stack| stack.iter())
+                .map(|elem| elem.len() as u64)
                 .sum();
             stripped_size as u64 * 4 + witness_bytes
         } else {
@@ -331,8 +332,7 @@ impl BitcoinProtocolEngine {
 
     /// Calculate block size in bytes
     fn calculate_block_size(&self, block: &Block) -> u32 {
-        // Simplified size calculation
-        // In reality, this would include proper serialization
+        // Block size = 80-byte header + varint tx count + serialized transactions (no witness).
         let header_size = 80; // Block header is always 80 bytes
         let tx_count_size = 4; // Varint for transaction count
         let tx_sizes: u32 = block
@@ -702,5 +702,81 @@ mod tests {
         assert!(rules.max_block_size <= 10_000_000); // Not unreasonably large
         assert!(rules.max_tx_size <= 5_000_000); // Not unreasonably large
         assert!(rules.max_script_size <= 50_000); // Not unreasonably large
+    }
+
+    #[test]
+    fn test_block_weight_counts_witness_element_bytes() {
+        use blvm_consensus::opcodes::OP_1;
+        use blvm_consensus::{
+            Block, BlockHeader, OutPoint, Transaction, TransactionInput, TransactionOutput,
+        };
+
+        let engine = BitcoinProtocolEngine::new(ProtocolVersion::Regtest).unwrap();
+        let mut context = ProtocolValidationContext::new(ProtocolVersion::Regtest, 1).unwrap();
+        context.validation_rules.max_block_size = 5_000;
+
+        let coinbase = Transaction {
+            version: 1,
+            inputs: vec![TransactionInput {
+                prevout: OutPoint {
+                    hash: [0u8; 32],
+                    index: 0xffffffff,
+                },
+                script_sig: vec![OP_1].into(),
+                sequence: 0xffffffff,
+            }]
+            .into(),
+            outputs: vec![TransactionOutput {
+                value: 50_0000_0000,
+                script_pubkey: vec![OP_1].into(),
+            }]
+            .into(),
+            lock_time: 0,
+        };
+        let tx = Transaction {
+            version: 2,
+            inputs: vec![TransactionInput {
+                prevout: OutPoint {
+                    hash: [1u8; 32],
+                    index: 0,
+                },
+                script_sig: vec![OP_1].into(),
+                sequence: 0xffffffff,
+            }]
+            .into(),
+            outputs: vec![TransactionOutput {
+                value: 1_000,
+                script_pubkey: vec![OP_1].into(),
+            }]
+            .into(),
+            lock_time: 0,
+        };
+        let block = Block {
+            header: BlockHeader {
+                version: 1,
+                prev_block_hash: [0u8; 32],
+                merkle_root: [0u8; 32],
+                timestamp: 1_700_000_000,
+                bits: 0x207fffff,
+                nonce: 0,
+            },
+            transactions: vec![coinbase, tx].into(),
+        };
+        // One heavy witness element (9000 bytes) — stack depth alone would be 1 WU (REV-P-07).
+        let heavy_elem = vec![0u8; 9000];
+        let witnesses: Vec<Vec<blvm_consensus::segwit::Witness>> =
+            vec![vec![vec![]], vec![vec![heavy_elem]]];
+
+        let result = engine.validate_block_with_protocol_and_witnesses(
+            &block,
+            &witnesses,
+            &UtxoSet::default(),
+            1,
+            &context,
+        );
+        assert!(
+            result.is_err(),
+            "heavy witness bytes must exceed reduced max_block_size weight limit"
+        );
     }
 }

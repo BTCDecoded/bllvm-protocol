@@ -105,7 +105,7 @@ where
 pub fn process_and_verify_filtered_block(
     filtered_block: &FilteredBlock,
     expected_height: Natural,
-    _spam_filter: &SpamFilter,
+    spam_filter: &SpamFilter,
 ) -> UtxoCommitmentResult<bool> {
     // Verify block header height matches expected
     // (In real implementation, would verify full header chain)
@@ -118,8 +118,8 @@ pub fn process_and_verify_filtered_block(
         )));
     }
 
-    // Verify transactions are properly filtered
-    // (In real implementation, would re-apply filter and compare)
+    // Verify transactions are non-spam (re-apply local filter; fail closed on mismatch).
+    verify_filtered_block_spam_filtering(filtered_block, spam_filter)?;
 
     // Verify commitment block hash matches header
     let computed_hash = compute_block_hash(&filtered_block.header);
@@ -131,6 +131,41 @@ pub fn process_and_verify_filtered_block(
     }
 
     Ok(true)
+}
+
+/// Re-apply the spam filter to a peer-supplied filtered block.
+///
+/// The wire `FilteredBlock` carries only non-spam transactions; we verify each
+/// included transaction passes the local filter. Summary counts for removed spam
+/// cannot be checked without the full block — peers must not include spam txs.
+fn verify_filtered_block_spam_filtering(
+    filtered_block: &FilteredBlock,
+    spam_filter: &SpamFilter,
+) -> UtxoCommitmentResult<()> {
+    for (index, tx) in filtered_block.transactions.iter().enumerate() {
+        if spam_filter.is_spam(tx).is_spam {
+            return Err(UtxoCommitmentError::VerificationFailed(format!(
+                "Filtered block transaction {index} failed local spam filter"
+            )));
+        }
+    }
+
+    let (retained, recomputed_summary) = spam_filter.filter_block(&filtered_block.transactions);
+    if retained.len() != filtered_block.transactions.len() {
+        return Err(UtxoCommitmentError::VerificationFailed(
+            "Filtered block transactions fail local spam re-filter".to_string(),
+        ));
+    }
+    if recomputed_summary.filtered_count != 0 {
+        return Err(UtxoCommitmentError::VerificationFailed(
+            "Filtered block included transactions classified as spam locally".to_string(),
+        ));
+    }
+
+    // Summary for removed spam txs is informational when the full block is absent.
+    let _ = &filtered_block.spam_summary;
+
+    Ok(())
 }
 
 /// Compute block header hash (double SHA256)
@@ -151,4 +186,62 @@ fn compute_block_hash(header: &BlockHeader) -> HashType {
     let mut hash = [0u8; 32];
     hash.copy_from_slice(&second_hash);
     hash
+}
+
+#[cfg(all(test, feature = "utxo-commitments"))]
+mod verify_tests {
+    use super::*;
+    use blvm_consensus::types::{OutPoint, Transaction, TransactionInput, TransactionOutput};
+
+    fn sample_header() -> BlockHeader {
+        BlockHeader {
+            version: 1,
+            prev_block_hash: [0u8; 32],
+            merkle_root: [1u8; 32],
+            timestamp: 1_700_000_000,
+            bits: 0x207fffff,
+            nonce: 0,
+        }
+    }
+
+    fn sample_tx() -> Transaction {
+        Transaction {
+            version: 1,
+            inputs: blvm_consensus::tx_inputs![TransactionInput {
+                prevout: OutPoint {
+                    hash: [2u8; 32],
+                    index: 0,
+                },
+                script_sig: vec![0x51],
+                sequence: 0xffff_ffff,
+            }],
+            outputs: blvm_consensus::tx_outputs![TransactionOutput {
+                value: 50_000,
+                script_pubkey: vec![0x76, 0xa9, 0x14].repeat(20),
+            }],
+            lock_time: 0,
+        }
+    }
+
+    #[test]
+    fn process_and_verify_filtered_block_reapplies_spam_filter() {
+        let header = sample_header();
+        let hash = compute_block_hash(&header);
+        let spam_filter = SpamFilter::new();
+        let filtered_block = FilteredBlock {
+            header: header.clone(),
+            commitment: UtxoCommitment {
+                merkle_root: [3u8; 32],
+                total_supply: 21_000_000,
+                utxo_count: 1,
+                block_height: 100,
+                block_hash: hash,
+            },
+            transactions: vec![sample_tx()],
+            transaction_indices: vec![0],
+            spam_summary: SpamSummary::default(),
+        };
+
+        assert!(process_and_verify_filtered_block(&filtered_block, 100, &spam_filter).unwrap());
+    }
 }

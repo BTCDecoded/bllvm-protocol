@@ -5,7 +5,7 @@
 use blvm_consensus::types::{OutPoint, UtxoSet};
 use blvm_consensus::{Block, BlockHeader, Transaction, TransactionInput, TransactionOutput};
 use blvm_protocol::validation::{ProtocolValidationContext, ProtocolValidationRules};
-use blvm_protocol::{BitcoinProtocolEngine, ProtocolVersion};
+use blvm_protocol::{BitcoinProtocolEngine, ProtocolVersion, ValidationResult};
 
 /// Test helper: Create a simple transaction
 fn create_simple_transaction() -> Transaction {
@@ -16,7 +16,7 @@ fn create_simple_transaction() -> Transaction {
                 hash: [0u8; 32],
                 index: 0xffffffff,
             },
-            script_sig: vec![blvm_consensus::opcodes::OP_1],
+            script_sig: vec![0x01, 0x00],
             sequence: 0xffffffff,
         }],
         outputs: blvm_consensus::tx_outputs![TransactionOutput {
@@ -184,45 +184,41 @@ fn test_script_size_validation() {
 
 #[test]
 fn test_validate_block_with_protocol() {
-    // Test validating a block with protocol rules
-    let engine = BitcoinProtocolEngine::new(ProtocolVersion::BitcoinV1).unwrap();
-    let context = ProtocolValidationContext::new(ProtocolVersion::BitcoinV1, 0).unwrap();
+    let engine = BitcoinProtocolEngine::new(ProtocolVersion::Regtest).unwrap();
+    let mut context = ProtocolValidationContext::new(ProtocolVersion::Regtest, 0).unwrap();
     let utxos = UtxoSet::default();
 
-    // Create a simple block
     let block = Block {
         header: BlockHeader {
-            version: 1,
+            version: 4,
             prev_block_hash: [0u8; 32],
-            merkle_root: [0u8; 32],
-            timestamp: 1231006505,
-            bits: 0x1d00ffff,
+            merkle_root: [1; 32],
+            timestamp: 1_700_000_000,
+            bits: 0x207fffff,
             nonce: 0,
         },
         transactions: vec![create_simple_transaction()].into_boxed_slice(),
     };
+    context.network_time = block.header.timestamp;
 
-    // Should validate successfully
-    let result = engine.validate_block_with_protocol(&block, &utxos, 0, &context);
-    // May fail consensus validation, but protocol validation should pass
-    // For now, we verify the method exists and can be called
-    let _ = result;
+    let result = engine
+        .validate_block_with_protocol(&block, &utxos, 0, &context)
+        .unwrap();
+    assert_eq!(result, ValidationResult::Valid);
 }
 
 #[test]
 fn test_validate_transaction_with_protocol() {
-    // Test validating a transaction with protocol rules
-    let engine = BitcoinProtocolEngine::new(ProtocolVersion::BitcoinV1).unwrap();
-    let context = ProtocolValidationContext::new(ProtocolVersion::BitcoinV1, 0).unwrap();
+    let engine = BitcoinProtocolEngine::new(ProtocolVersion::Regtest).unwrap();
+    let mut context = ProtocolValidationContext::new(ProtocolVersion::Regtest, 0).unwrap();
+    context.network_time = 1_700_000_000;
 
-    // Create a simple transaction
     let tx = create_simple_transaction();
 
-    // Should validate successfully
-    let result = engine.validate_transaction_with_protocol(&tx, &context);
-    // May fail consensus validation, but protocol validation should pass
-    // For now, we verify the method exists and can be called
-    let _ = result;
+    let result = engine
+        .validate_transaction_with_protocol(&tx, &context)
+        .unwrap();
+    assert_eq!(result, ValidationResult::Valid);
 }
 
 // ============================================================================

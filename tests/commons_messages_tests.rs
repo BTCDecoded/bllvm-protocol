@@ -25,6 +25,15 @@ fn create_test_peer_state() -> PeerState {
     PeerState::new()
 }
 
+fn assert_reject_contains(response: NetworkResponse, needle: &str) {
+    match response {
+        NetworkResponse::Reject(reason) => {
+            assert!(reason.contains(needle), "unexpected reject: {reason}")
+        }
+        other => panic!("Expected Reject containing {needle:?}, got {other:?}"),
+    }
+}
+
 // ============================================================================
 // Phase 1: UTXO Commitments Tests
 // ============================================================================
@@ -50,7 +59,7 @@ fn test_getutxoset_message_processing() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "UTXO set relay");
 }
 
 #[cfg(feature = "utxo-commitments")]
@@ -74,7 +83,7 @@ fn test_getutxoset_zero_height() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "UTXO set relay");
 }
 
 #[cfg(feature = "utxo-commitments")]
@@ -109,7 +118,7 @@ fn test_utxoset_message_processing() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "UTXO set relay");
 }
 
 #[cfg(feature = "utxo-commitments")]
@@ -145,7 +154,7 @@ fn test_utxoset_chunked_response() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "UTXO set relay");
 }
 
 // ============================================================================
@@ -182,7 +191,7 @@ fn test_getfilteredblock_message_processing() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "Filtered block relay");
 }
 
 #[cfg(feature = "utxo-commitments")]
@@ -215,7 +224,7 @@ fn test_getfilteredblock_no_bip158_filter() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "Filtered block relay");
 }
 
 #[cfg(feature = "utxo-commitments")]
@@ -283,7 +292,7 @@ fn test_filteredblock_message_processing() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "Filtered block relay");
 }
 
 #[cfg(feature = "utxo-commitments")]
@@ -335,7 +344,7 @@ fn test_filteredblock_empty_transactions() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "Filtered block relay");
 }
 
 // ============================================================================
@@ -362,7 +371,7 @@ fn test_getbanlist_message_processing() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "Ban list relay");
 }
 
 #[test]
@@ -385,7 +394,7 @@ fn test_getbanlist_no_min_score() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "Ban list relay");
 }
 
 #[test]
@@ -423,7 +432,7 @@ fn test_banlist_message_processing() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "Ban list relay");
 }
 
 #[test]
@@ -447,7 +456,7 @@ fn test_banlist_empty_entries() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "Ban list relay");
 }
 
 #[test]
@@ -485,7 +494,7 @@ fn test_banlist_with_signature() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "Ban list relay");
 }
 
 #[test]
@@ -526,5 +535,5 @@ fn test_banlist_multiple_entries() {
     )
     .unwrap();
 
-    assert!(matches!(response, NetworkResponse::Ok));
+    assert_reject_contains(response, "Ban list relay");
 }

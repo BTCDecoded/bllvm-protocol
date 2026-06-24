@@ -473,6 +473,12 @@ pub struct PeerState {
     pub ping_nonce: Option<u64>,
     pub last_pong: Option<std::time::SystemTime>,
     pub min_fee_rate: Option<u64>,
+    /// BIP130: peer prefers `headers` over `inv` for block announcements.
+    pub prefer_headers: bool,
+    /// BIP152: negotiated compact-block version (1 or 2), if peer sent sendcmpct.
+    pub compact_block_version: Option<u8>,
+    /// BIP152: peer prefers compact blocks when true.
+    pub prefer_compact_block: bool,
     /// BIP324: v2 encrypted transport state (if enabled)
     /// Note: V2Transport is not Clone, so we use Option<Box<V2Transport>> for storage
     #[cfg(all(
@@ -500,6 +506,9 @@ impl PeerState {
             ping_nonce: None,
             last_pong: None,
             min_fee_rate: None,
+            prefer_headers: false,
+            compact_block_version: None,
+            prefer_compact_block: false,
             #[cfg(all(
                 feature = "bip324",
                 any(target_arch = "x86_64", target_arch = "aarch64")
@@ -580,6 +589,14 @@ pub trait ChainStateAccess {
 
     /// Get all mempool transactions
     fn get_mempool_transactions(&self) -> Vec<Transaction>;
+
+    /// Witness stacks for a stored block (SegWit relay). Default: not available.
+    fn get_block_witnesses(
+        &self,
+        _hash: &Hash,
+    ) -> Option<Vec<Vec<blvm_consensus::segwit::Witness>>> {
+        None
+    }
 }
 
 /// Process incoming network message
@@ -823,9 +840,12 @@ fn process_getdata_message(
                     2 => {
                         // MSG_BLOCK
                         if let Some(block) = obj.as_block() {
-                            // ChainObject doesn't carry witnesses; relay with empty witnesses
-                            // (pre-SegWit peers or blocks fetched without witness data).
-                            responses.push(NetworkMessage::Block(Arc::clone(block), vec![]));
+                            let Some(witnesses) = chain.get_block_witnesses(&item.hash) else {
+                                // REV-P-08: do not synthesize empty witness stacks when storage
+                                // has no witness data (node layer serves notfound instead).
+                                continue;
+                            };
+                            responses.push(NetworkMessage::Block(Arc::clone(block), witnesses));
                         }
                     }
                     _ => {
@@ -1005,26 +1025,29 @@ fn process_getblocks_message(
         )));
     }
 
-    // Use chain access to find blocks (if provided)
-    // Note: GetBlocks is similar to GetHeaders but returns full blocks
-    // For now, we'll delegate to GetHeaders logic or return inv message
     if let Some(chain) = chain_access {
-        // Find blocks using locator and return inv message
-        let mut inventory = Vec::with_capacity(getblocks.block_locator_hashes.len());
-        for hash in &getblocks.block_locator_hashes {
-            if chain.has_object(hash) {
-                inventory.push(InventoryVector {
-                    inv_type: 2, // MSG_BLOCK
-                    hash: *hash,
-                });
-            }
+        use blvm_consensus::block::block_header_hash;
+
+        // Core-compatible: walk locator to fork, then advertise block hashes after fork.
+        const MAX_GETBLOCKS_INV: usize = 500;
+        let headers =
+            chain.get_headers_for_locator(&getblocks.block_locator_hashes, &getblocks.hash_stop);
+        if headers.is_empty() {
+            return Ok(NetworkResponse::Ok);
         }
 
-        if !inventory.is_empty() {
-            return Ok(NetworkResponse::SendMessage(Box::new(NetworkMessage::Inv(
-                InvMessage { inventory },
-            ))));
-        }
+        let inventory: Vec<InventoryVector> = headers
+            .into_iter()
+            .take(MAX_GETBLOCKS_INV)
+            .map(|header| InventoryVector {
+                inv_type: 2, // MSG_BLOCK
+                hash: block_header_hash(&header),
+            })
+            .collect();
+
+        return Ok(NetworkResponse::SendMessage(Box::new(NetworkMessage::Inv(
+            InvMessage { inventory },
+        ))));
     }
 
     Ok(NetworkResponse::Ok)
@@ -1095,17 +1118,15 @@ fn process_reject_message(
 }
 
 /// Process sendheaders message
-fn process_sendheaders_message(_peer_state: &mut PeerState) -> Result<NetworkResponse> {
-    // Enable headers-only mode for this peer
-    // This is a flag that affects future GetHeaders responses
-    // For now, we just acknowledge (actual implementation would set a flag)
+fn process_sendheaders_message(peer_state: &mut PeerState) -> Result<NetworkResponse> {
+    peer_state.prefer_headers = true;
     Ok(NetworkResponse::Ok)
 }
 
 /// Process sendcmpct message (BIP152)
 fn process_sendcmpct_message(
     sendcmpct: &SendCmpctMessage,
-    _peer_state: &mut PeerState,
+    peer_state: &mut PeerState,
     config: &ProtocolConfig,
 ) -> Result<NetworkResponse> {
     // Validate version (must be 1 or 2, or match configured preferred version)
@@ -1122,16 +1143,16 @@ fn process_sendcmpct_message(
     }
 
     // Store compact block preference in peer state
-    // (actual implementation would store this)
-    let _ = (sendcmpct.version, sendcmpct.prefer_cmpct);
+    peer_state.compact_block_version = Some(sendcmpct.version as u8);
+    peer_state.prefer_compact_block = sendcmpct.prefer_cmpct != 0;
     Ok(NetworkResponse::Ok)
 }
 
 /// Process cmpctblock message (BIP152)
 fn process_cmpctblock_message(_cmpctblock: &CmpctBlockMessage) -> Result<NetworkResponse> {
-    // Validate compact block and reconstruct full block
-    // For now, just acknowledge (actual implementation would validate and reconstruct)
-    Ok(NetworkResponse::Ok)
+    Ok(NetworkResponse::Reject(
+        "Compact block reconstruction not implemented".into(),
+    ))
 }
 
 /// Process getblocktxn message (BIP152)
@@ -1148,29 +1169,43 @@ fn process_getblocktxn_message(
         )));
     }
 
-    // Use chain access to get requested transactions
+    // Use chain access to get requested transactions and witnesses
     if let Some(chain) = chain_access {
-        let mut transactions = Vec::new();
-        for &index in &getblocktxn.indices {
-            // Get block and extract transaction at index
-            // (simplified - actual implementation would get block first)
-            if let Some(obj) = chain.get_object(&getblocktxn.block_hash) {
-                if let Some(block) = obj.as_block() {
-                    if (index as usize) < block.transactions.len() {
-                        transactions.push(block.transactions[index as usize].clone());
+        if let Some(obj) = chain.get_object(&getblocktxn.block_hash) {
+            if let Some(block) = obj.as_block() {
+                let stored_witnesses = chain.get_block_witnesses(&getblocktxn.block_hash);
+                let mut transactions = Vec::with_capacity(getblocktxn.indices.len());
+                let mut req_witnesses = Vec::with_capacity(getblocktxn.indices.len());
+
+                for &index in &getblocktxn.indices {
+                    let idx = index as usize;
+                    if idx >= block.transactions.len() {
+                        continue;
                     }
+                    transactions.push(block.transactions[idx].clone());
+                    let tx_witness = stored_witnesses
+                        .as_ref()
+                        .and_then(|w| w.get(idx).cloned())
+                        .unwrap_or_else(|| {
+                            block.transactions[idx]
+                                .inputs
+                                .iter()
+                                .map(|_| Vec::new())
+                                .collect()
+                        });
+                    req_witnesses.push(tx_witness);
+                }
+
+                if !transactions.is_empty() {
+                    return Ok(NetworkResponse::SendMessage(Box::new(
+                        NetworkMessage::BlockTxn(BlockTxnMessage {
+                            block_hash: getblocktxn.block_hash,
+                            transactions,
+                            witnesses: Some(req_witnesses),
+                        }),
+                    )));
                 }
             }
-        }
-
-        if !transactions.is_empty() {
-            return Ok(NetworkResponse::SendMessage(Box::new(
-                NetworkMessage::BlockTxn(BlockTxnMessage {
-                    block_hash: getblocktxn.block_hash,
-                    transactions,
-                    witnesses: None, // Chain access returns tx only; no witness data
-                }),
-            )));
         }
     }
 
@@ -1179,25 +1214,25 @@ fn process_getblocktxn_message(
 
 /// Process blocktxn message (BIP152)
 fn process_blocktxn_message(_blocktxn: &BlockTxnMessage) -> Result<NetworkResponse> {
-    // Validate transactions and use to reconstruct block
-    // For now, just acknowledge (actual implementation would validate and reconstruct)
-    Ok(NetworkResponse::Ok)
+    Ok(NetworkResponse::Reject(
+        "Compact block reconstruction not implemented".into(),
+    ))
 }
 
 #[cfg(feature = "utxo-commitments")]
 /// Process getutxoset message
 fn process_getutxoset_message(_getutxoset: &commons::GetUTXOSetMessage) -> Result<NetworkResponse> {
-    // Request UTXO set at specific height
-    // For now, just acknowledge (actual implementation would fetch and return UTXO set)
-    Ok(NetworkResponse::Ok)
+    Ok(NetworkResponse::Reject(
+        "UTXO set relay not implemented".into(),
+    ))
 }
 
 #[cfg(feature = "utxo-commitments")]
 /// Process utxoset message
 fn process_utxoset_message(_utxoset: &commons::UTXOSetMessage) -> Result<NetworkResponse> {
-    // Receive UTXO set commitment
-    // For now, just acknowledge (actual implementation would validate and store)
-    Ok(NetworkResponse::Ok)
+    Ok(NetworkResponse::Reject(
+        "UTXO set relay not implemented".into(),
+    ))
 }
 
 #[cfg(feature = "utxo-commitments")]
@@ -1205,9 +1240,9 @@ fn process_utxoset_message(_utxoset: &commons::UTXOSetMessage) -> Result<Network
 fn process_getfilteredblock_message(
     _getfiltered: &commons::GetFilteredBlockMessage,
 ) -> Result<NetworkResponse> {
-    // Request filtered block (spam-filtered)
-    // For now, just acknowledge (actual implementation would filter and return)
-    Ok(NetworkResponse::Ok)
+    Ok(NetworkResponse::Reject(
+        "Filtered block relay not implemented".into(),
+    ))
 }
 
 #[cfg(feature = "utxo-commitments")]
@@ -1215,21 +1250,21 @@ fn process_getfilteredblock_message(
 fn process_filteredblock_message(
     _filtered: &commons::FilteredBlockMessage,
 ) -> Result<NetworkResponse> {
-    // Receive filtered block
-    // For now, just acknowledge (actual implementation would validate and process)
-    Ok(NetworkResponse::Ok)
+    Ok(NetworkResponse::Reject(
+        "Filtered block relay not implemented".into(),
+    ))
 }
 
 /// Process getbanlist message
 fn process_getbanlist_message(_getbanlist: &commons::GetBanListMessage) -> Result<NetworkResponse> {
-    // Request ban list from peer
-    // For now, just acknowledge (actual implementation would return ban list)
-    Ok(NetworkResponse::Ok)
+    Ok(NetworkResponse::Reject(
+        "Ban list relay not implemented".into(),
+    ))
 }
 
 /// Process banlist message
 fn process_banlist_message(_banlist: &commons::BanListMessage) -> Result<NetworkResponse> {
-    // Receive ban list from peer
-    // For now, just acknowledge (actual implementation would validate and merge)
-    Ok(NetworkResponse::Ok)
+    Ok(NetworkResponse::Reject(
+        "Ban list relay not implemented".into(),
+    ))
 }

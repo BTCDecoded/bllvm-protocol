@@ -91,8 +91,7 @@ impl ScriptType {
             return multisig;
         }
 
-        // Payment channel detection: Check for HTLC patterns
-        // This is a simplified check - full implementation would parse script
+        // Payment channel detection: HTLC opcode patterns on executable path only
         if Self::has_htlc_pattern(script_pubkey) {
             return Self::PaymentChannel;
         }
@@ -145,30 +144,23 @@ impl ScriptType {
         Some(Self::MultiSig { n, m })
     }
 
-    /// Check if script has HTLC (Hash Time Lock Contract) pattern
+    /// Check if script has HTLC (Hash Time Lock Contract) pattern on the executable path.
     ///
-    /// HTLCs are used in payment channels (Lightning Network).
-    /// This is a simplified check - full implementation would parse script.
+    /// HTLCs are used in payment channels (Lightning Network). Requires conditional branch,
+    /// time lock, hash, and equality opcodes as executable instructions (not inside push data).
     fn has_htlc_pattern(script: &ByteString) -> bool {
-        // HTLC patterns typically include:
-        // - OP_IF / OP_NOTIF (conditional branches)
-        // - OP_CHECKLOCKTIMEVERIFY or OP_CHECKSEQUENCEVERIFY
-        // - OP_HASH160 or OP_SHA256
-        // - OP_EQUALVERIFY
-        // This is a heuristic - not all scripts with these patterns are HTLCs
-
         if script.len() < 20 {
             return false;
         }
 
-        // Check for common HTLC opcodes
-        let has_conditional = script.contains(&OP_IF) || script.contains(&OP_NOTIF);
-        let has_time_lock =
-            script.contains(&OP_CHECKLOCKTIMEVERIFY) || script.contains(&OP_CHECKSEQUENCEVERIFY);
-        let has_hash = script.contains(&OP_HASH160) || script.contains(&OP_SHA256);
-        let has_equal = script.contains(&OP_EQUALVERIFY);
+        let has_conditional = script_has_executable_opcode(script, OP_IF)
+            || script_has_executable_opcode(script, OP_NOTIF);
+        let has_time_lock = script_has_executable_opcode(script, OP_CHECKLOCKTIMEVERIFY)
+            || script_has_executable_opcode(script, OP_CHECKSEQUENCEVERIFY);
+        let has_hash = script_has_executable_opcode(script, OP_HASH160)
+            || script_has_executable_opcode(script, OP_SHA256);
+        let has_equal = script_has_executable_opcode(script, OP_EQUALVERIFY);
 
-        // HTLCs typically have all of these
         has_conditional && has_time_lock && has_hash && has_equal
     }
 
@@ -221,6 +213,53 @@ impl ScriptType {
             Self::MultiSig { .. } => unreachable!("handled above"),
         }
     }
+}
+
+/// Returns true when `opcode` appears as an executable instruction (not inside push data).
+fn script_has_executable_opcode(script: &ByteString, opcode: u8) -> bool {
+    let mut i = 0;
+    while i < script.len() {
+        let op = script[i];
+        if op > 0 && op < OP_PUSHDATA1 {
+            i += 1 + op as usize;
+            continue;
+        }
+        match op {
+            OP_PUSHDATA1 => {
+                if i + 1 >= script.len() {
+                    break;
+                }
+                let len = script[i + 1] as usize;
+                i += 2 + len;
+            }
+            OP_PUSHDATA2 => {
+                if i + 2 >= script.len() {
+                    break;
+                }
+                let len = u16::from_le_bytes([script[i + 1], script[i + 2]]) as usize;
+                i += 3 + len;
+            }
+            OP_PUSHDATA4 => {
+                if i + 4 >= script.len() {
+                    break;
+                }
+                let len = u32::from_le_bytes([
+                    script[i + 1],
+                    script[i + 2],
+                    script[i + 3],
+                    script[i + 4],
+                ]) as usize;
+                i += 5 + len;
+            }
+            _ => {
+                if op == opcode {
+                    return true;
+                }
+                i += 1;
+            }
+        }
+    }
+    false
 }
 
 /// Detect script type from input script (scriptSig)
@@ -291,8 +330,7 @@ impl TransactionType {
             }
         }
 
-        // Payment channel: complex scripts, specific patterns
-        // This is a simplified check - full implementation would parse scripts
+        // Payment channel: heuristic pattern match (see has_payment_channel_pattern).
         if Self::has_payment_channel_pattern(tx) {
             return Self::PaymentChannel;
         }

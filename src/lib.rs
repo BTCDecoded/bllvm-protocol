@@ -221,13 +221,7 @@ pub mod types {
     pub use blvm_consensus::types::*;
 }
 // Re-export macros from blvm-consensus for convenience
-#[cfg(feature = "production")]
 pub use blvm_consensus::tx_inputs;
-#[cfg(not(feature = "production"))]
-pub use blvm_consensus::tx_inputs;
-#[cfg(feature = "production")]
-pub use blvm_consensus::tx_outputs;
-#[cfg(not(feature = "production"))]
 pub use blvm_consensus::tx_outputs;
 pub mod error;
 
@@ -511,15 +505,31 @@ impl BitcoinProtocolEngine {
             return Ok((protocol_result, utxos.clone()));
         }
 
-        // Then, consensus validation with UTXO update
-        let network_time = crate::time::current_timestamp();
-        let context = self.connect_block_validation_context(recent_headers, network_time);
+        // Consensus connect: use caller time context (REV-P-22), not wall clock.
+        let network_time = if context.network_time > 0 {
+            context.network_time
+        } else {
+            crate::time::current_timestamp()
+        };
+        let mut consensus_ctx = if context.median_time_past > 0 {
+            block::BlockValidationContext::from_time_context_and_network(
+                Some(blvm_consensus::types::TimeContext {
+                    network_time,
+                    median_time_past: context.median_time_past,
+                }),
+                self.protocol_version.consensus_network(),
+                None,
+            )
+        } else {
+            self.connect_block_validation_context(recent_headers, network_time)
+        };
+        consensus_ctx.signet_challenge = self.network_params.signet_challenge.clone();
         let (result, new_utxo_set, _undo_log) = blvm_consensus::block::connect_block(
             block,
             witnesses,
             utxos.clone(),
             height,
-            &context,
+            &consensus_ctx,
         )?;
 
         Ok((result, new_utxo_set))
@@ -764,72 +774,58 @@ mod tests {
 
     #[test]
     fn test_block_validation_empty_utxos() {
-        let engine = BitcoinProtocolEngine::new(ProtocolVersion::BitcoinV1).unwrap();
+        use crate::validation::ProtocolValidationContext;
+        use blvm_consensus::opcodes::OP_1;
+
+        let engine = BitcoinProtocolEngine::new(ProtocolVersion::Regtest).unwrap();
         let utxos = UtxoSet::default();
 
-        // Create a simple block with just a coinbase transaction
         let coinbase_tx = Transaction {
-            version: 1,
+            version: 2,
             inputs: blvm_consensus::tx_inputs![TransactionInput {
                 prevout: OutPoint {
                     hash: [0u8; 32],
                     index: 0xffffffff,
                 },
-                script_sig: vec![0x01, 0x00], // Height 0
+                script_sig: vec![0x01, 0x00],
                 sequence: 0xffffffff,
             }],
             outputs: blvm_consensus::tx_outputs![TransactionOutput {
-                value: 50_0000_0000,
-                script_pubkey: vec![
-                    blvm_consensus::opcodes::OP_DUP,
-                    blvm_consensus::opcodes::OP_HASH160,
-                    blvm_consensus::opcodes::PUSH_20_BYTES,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    blvm_consensus::opcodes::OP_EQUALVERIFY,
-                    blvm_consensus::opcodes::OP_CHECKSIG,
-                ], // P2PKH
+                value: 5_000_000_000,
+                script_pubkey: vec![OP_1],
             }],
             lock_time: 0,
         };
 
-        // Calculate proper merkle root
         let merkle_root = blvm_consensus::mining::calculate_merkle_root(&[coinbase_tx.clone()])
-            .expect("Should calculate merkle root");
+            .expect("merkle root");
 
         let block = Block {
             header: BlockHeader {
-                version: 1,
+                version: 4,
                 prev_block_hash: [0u8; 32],
                 merkle_root,
-                timestamp: 1231006505,
-                bits: 0x1d00ffff,
+                timestamp: 1_231_006_505,
+                bits: 0x0300ffff,
                 nonce: 0,
             },
             transactions: vec![coinbase_tx].into_boxed_slice(),
         };
 
-        // This should pass validation for a genesis block
-        let result = engine.validate_block(&block, &utxos, 0);
-        assert!(result.is_ok());
+        let witnesses: Vec<Vec<blvm_consensus::segwit::Witness>> = block
+            .transactions
+            .iter()
+            .map(|tx| tx.inputs.iter().map(|_| Vec::new()).collect())
+            .collect();
+        let mut context = ProtocolValidationContext::new(ProtocolVersion::Regtest, 0).unwrap();
+        context.network_time = block.header.timestamp;
+        context.median_time_past = block.header.timestamp;
+
+        let (result, new_utxos) = engine
+            .validate_and_connect_block(&block, &witnesses, &utxos, 0, None, &context)
+            .unwrap();
+        assert_eq!(result, ValidationResult::Valid);
+        assert!(!new_utxos.is_empty());
     }
 
     #[test]

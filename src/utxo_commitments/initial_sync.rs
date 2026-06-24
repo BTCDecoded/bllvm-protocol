@@ -86,18 +86,15 @@ impl InitialSync {
             .cloned()
             .collect();
 
-        // Step 2: Determine checkpoint height
-        // Note: Peer tip queries would require additional network protocol support.
-        // For now, we use the header chain fallback which is sufficient for initial sync.
-        let peer_tips: Vec<Natural> = vec![];
-        let checkpoint_height = if !peer_tips.is_empty() {
-            self.peer_consensus.determine_checkpoint_height(peer_tips)
-        } else if !header_chain.is_empty() {
+        // Step 2: Determine checkpoint height from the verified header chain.
+        // Peer tip queries (version/start_height aggregation) are not wired yet; the
+        // header chain tip minus safety margin is the supported checkpoint path (REV-P-14).
+        let checkpoint_height = if !header_chain.is_empty() {
             let tip = header_chain.len() as Natural - 1;
             tip.saturating_sub(self.peer_consensus.config.safety_margin)
         } else {
             return Err(UtxoCommitmentError::VerificationFailed(
-                "No header chain or peer tips available".to_string(),
+                "No header chain available for checkpoint selection".to_string(),
             ));
         };
 
@@ -131,16 +128,14 @@ impl InitialSync {
         self.peer_consensus
             .verify_consensus_commitment(&consensus, header_chain)?;
 
-        // Step 6: Optionally verify UTXO proofs for critical UTXOs
-        // This prevents coin freezing attacks where malicious peers provide
-        // commitments with correct total supply but missing/modified UTXOs.
-        // Note: This requires network protocol support for proof requests.
-        // For now, this is optional and can be enabled when needed.
+        // Step 6: Optional per-UTXO proof verification (requires network proof requests).
         #[cfg(feature = "utxo-proof-verification")]
         {
-            // Verify proofs for wallet UTXOs or random sampling
-            // Implementation depends on having access to wallet UTXOs
-            // or implementing random sampling strategy
+            return Err(UtxoCommitmentError::VerificationFailed(
+                "utxo-proof-verification feature is enabled but per-UTXO proof verification is not implemented; \
+                 disable the feature or use full-block sync_forward validation"
+                    .to_string(),
+            ));
         }
 
         // Step 7: Return verified commitment
@@ -318,11 +313,8 @@ impl InitialSync {
             // Update spam summary
             if is_spam {
                 spam_summary.filtered_count += 1;
-                // Estimate transaction size (simplified calculation)
-                let tx_size = 4 + 1 + 1 + 4 + // version + input_count + output_count + locktime
-                    (tx.inputs.len() as u64 * 150) + // inputs
-                    tx.outputs.iter().map(|out| 8 + out.script_pubkey.len() as u64).sum::<u64>(); // outputs
-                spam_summary.filtered_size += tx_size;
+                spam_summary.filtered_size +=
+                    blvm_consensus::transaction::calculate_transaction_size(tx) as u64;
 
                 // Update breakdown
                 for spam_type in &spam_result.detected_types {

@@ -314,7 +314,7 @@ impl Default for SpamFilterConfig {
             max_total_witness_size: 5000,
             use_improved_envelope_detection: true,
             use_json_validation_brc20: true,
-            require_utxo_for_fee_rate: false, // Use heuristic fallback
+            require_utxo_for_fee_rate: false, // When true, reject if UTXO set missing; else skip fee check
             min_fee_rate_large_tx: 2,         // 2 sat/vB
             large_tx_threshold_bytes: 1000,   // 1 KB
             ordinals_strict_mode: true,       // Envelope/pattern only; LargeWitness is separate
@@ -398,7 +398,7 @@ impl SpamFilter {
         let mut detected_types = Vec::new();
 
         // Check for Ordinals/Inscriptions (now with witness data support)
-        if self.config.filter_ordinals && self.detect_ordinals(tx, witnesses) {
+        if self.config.filter_ordinals && self.detect_ordinals(tx, witnesses, utxo_set) {
             detected_types.push(SpamType::Ordinals);
         }
 
@@ -413,7 +413,7 @@ impl SpamFilter {
         }
 
         // Check for large witness data (now with adaptive thresholds)
-        if self.config.filter_large_witness && self.detect_large_witness(tx, witnesses) {
+        if self.config.filter_large_witness && self.detect_large_witness(tx, witnesses, utxo_set) {
             detected_types.push(SpamType::LargeWitness);
         }
 
@@ -467,7 +467,12 @@ impl SpamFilter {
     /// - Witness scripts (SegWit v0 or Taproot) - PRIMARY METHOD
     /// - Script pubkey (OP_RETURN or data push)
     /// - Envelope protocol patterns
-    fn detect_ordinals(&self, tx: &Transaction, witnesses: Option<&[Witness]>) -> bool {
+    fn detect_ordinals(
+        &self,
+        tx: &Transaction,
+        witnesses: Option<&[Witness]>,
+        utxo_set: Option<&UtxoSet>,
+    ) -> bool {
         // Check outputs for OP_RETURN or data pushes (common Ordinals pattern)
         for output in &tx.outputs {
             if self.has_ordinal_pattern(&output.script_pubkey) {
@@ -509,7 +514,7 @@ impl SpamFilter {
                 // Strict mode: LargeWitness is handled separately by detect_large_witness
                 if !self.config.ordinals_strict_mode {
                     if self.config.use_adaptive_thresholds {
-                        if self.has_large_witness_stack_adaptive(witness, tx, i) {
+                        if self.has_large_witness_stack_adaptive(witness, tx, i, utxo_set) {
                             return true;
                         }
                     } else if self.has_large_witness_stack(witness) {
@@ -613,6 +618,7 @@ impl SpamFilter {
         witness: &Witness,
         tx: &Transaction,
         input_index: usize,
+        utxo_set: Option<&UtxoSet>,
     ) -> bool {
         let total_size = self.calculate_witness_size(witness);
 
@@ -621,30 +627,12 @@ impl SpamFilter {
             return total_size > self.config.max_witness_size;
         }
 
-        // Prefer script type from this input's scriptSig when we can infer it (SegWit often
-        // uses an empty scriptSig; see `detect_input_script_type`). Otherwise fall back to
-        // scanning outputs — a simplified heuristic until prevout mapping is available.
-        let mut detected_script_type: Option<ScriptType> = None;
-        if input_index < tx.inputs.len() {
-            detected_script_type = detect_input_script_type(&tx.inputs[input_index].script_sig);
-        }
-        if detected_script_type.is_none() {
-            for output in &tx.outputs {
-                let script_type = ScriptType::detect(&output.script_pubkey);
-                if script_type != ScriptType::Unknown {
-                    detected_script_type = Some(script_type);
-                    break;
-                }
-            }
-        }
-
-        // Get threshold based on script type
-        let threshold = if let Some(script_type) = detected_script_type {
-            script_type.recommended_threshold()
-        } else {
-            // Fallback to fixed threshold if script type unknown
-            self.config.max_witness_size
-        };
+        let threshold =
+            if let Some(script_type) = detect_script_type_for_input(tx, input_index, utxo_set) {
+                script_type.recommended_threshold()
+            } else {
+                self.config.max_witness_size
+            };
 
         total_size > threshold
     }
@@ -823,12 +811,17 @@ impl SpamFilter {
     ///
     /// Large witness stacks often indicate data embedding (Ordinals, inscriptions).
     /// Now uses adaptive thresholds based on script type.
-    fn detect_large_witness(&self, tx: &Transaction, witnesses: Option<&[Witness]>) -> bool {
+    fn detect_large_witness(
+        &self,
+        tx: &Transaction,
+        witnesses: Option<&[Witness]>,
+        utxo_set: Option<&UtxoSet>,
+    ) -> bool {
         if let Some(witnesses) = witnesses {
             for (i, witness) in witnesses.iter().enumerate() {
                 // Use adaptive thresholds if enabled
                 if self.config.use_adaptive_thresholds {
-                    if self.has_large_witness_stack_adaptive(witness, tx, i) {
+                    if self.has_large_witness_stack_adaptive(witness, tx, i, utxo_set) {
                         return true;
                     }
                 } else if self.has_large_witness_stack(witness) {
@@ -859,11 +852,11 @@ impl SpamFilter {
 
         // Calculate fee rate
         let fee_rate = if let Some(utxo_set) = utxo_set {
-            // Accurate calculation with UTXO set
             self.calculate_fee_rate_accurate(tx, utxo_set, tx_size)
         } else {
-            // Fallback to heuristic when UTXO set unavailable
-            self.calculate_fee_rate_heuristic(tx, tx_size)
+            // Without UTXO inputs we cannot compute fee rate; skip to avoid false negatives
+            // from the old min_fee_rate heuristic (REV-P-21).
+            return false;
         };
 
         // Check against threshold (use large tx threshold if applicable)
@@ -903,6 +896,7 @@ impl SpamFilter {
     }
 
     /// Calculate fee rate using heuristics (fallback)
+    #[allow(dead_code)]
     fn calculate_fee_rate_heuristic(&self, tx: &Transaction, tx_size: usize) -> u64 {
         if tx_size == 0 {
             return 0;
@@ -1254,36 +1248,32 @@ pub struct SpamBreakdown {
     pub brc20: u32,
 }
 
-/// Estimate transaction size in bytes
+/// Estimate transaction size in bytes (consensus serialization length).
 fn estimate_transaction_size(tx: &Transaction) -> u64 {
-    // Simplified estimation:
-    // - Version: 4 bytes
-    // - Input count: varint (1-9 bytes, estimate 1)
-    // - Per input: ~150 bytes (prevout + script + sequence)
-    // - Output count: varint (1-9 bytes, estimate 1)
-    // - Per output: ~35 bytes (value + script)
-    // - Locktime: 4 bytes
+    blvm_consensus::transaction::calculate_transaction_size(tx) as u64
+}
 
-    let base_size: u64 = 4 + 1 + 1 + 4; // Version + input count + output count + locktime
-    let input_size = tx.inputs.len() as u64 * 150;
-    let output_size = tx
-        .outputs
-        .iter()
-        .map(|out| 8 + out.script_pubkey.len() as u64)
-        .sum::<u64>();
+/// Detect script type for a specific input using prevout UTXO script when available.
+fn detect_script_type_for_input(
+    tx: &Transaction,
+    input_index: usize,
+    utxo_set: Option<&UtxoSet>,
+) -> Option<ScriptType> {
+    if input_index >= tx.inputs.len() {
+        return None;
+    }
 
-    let total_size = base_size
-        .checked_add(input_size)
-        .and_then(|sum| sum.checked_add(output_size))
-        .unwrap_or(u64::MAX); // Overflow protection
+    if let Some(utxo_set) = utxo_set {
+        if let Some(utxo) = utxo_set.get(&tx.inputs[input_index].prevout) {
+            let spk: ByteString = utxo.script_pubkey.as_ref().to_vec();
+            let script_type = ScriptType::detect(&spk);
+            if script_type != ScriptType::Unknown {
+                return Some(script_type);
+            }
+        }
+    }
 
-    // Runtime assertion: Estimated size must be reasonable
-    debug_assert!(
-        total_size <= 1_000_000,
-        "Transaction size estimate ({total_size}) must not exceed MAX_TX_SIZE (1MB)"
-    );
-
-    total_size
+    detect_input_script_type(&tx.inputs[input_index].script_sig)
 }
 
 /// Serializable adaptive thresholds
