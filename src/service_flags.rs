@@ -42,7 +42,7 @@ pub mod commons {
     /// Node supports FIBRE (Fast Internet Bitcoin Relay Engine)
     pub const NODE_FIBRE: u64 = 1 << 26;
 
-    /// Node supports UTXO Commitments protocol
+    /// Node supports UTXO Commitments protocol (bit 27).
     #[cfg(feature = "utxo-commitments")]
     pub const NODE_UTXO_COMMITMENTS: u64 = 1 << 27;
 

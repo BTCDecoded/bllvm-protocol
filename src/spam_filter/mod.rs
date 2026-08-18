@@ -240,8 +240,8 @@ pub struct SpamFilterConfig {
     pub filter_taproot_spam: bool,
     /// Maximum Taproot control block size (bytes)
     /// Control blocks: 33 bytes base + 32 bytes per tree level
-    /// BIP-110 limits to 257 bytes (depth 7), we use 289 bytes (depth 8) for policy
-    /// Default: 289 bytes (allows depth 8, more lenient than BIP-110)
+    /// Relay policy default: 289 bytes (depth 8); tighter thresholds may reject deeper trees
+    /// Default: 289 bytes (allows depth 8)
     pub max_taproot_control_size: usize,
     /// Reject Taproot annexes (last witness element starting with OP_RESERVED)
     /// Default: true
@@ -574,7 +574,7 @@ impl SpamFilter {
         if self.config.reject_taproot_annexes {
             if let Some(last) = witness.last() {
                 if !last.is_empty() && last[0] == blvm_consensus::opcodes::OP_RESERVED {
-                    // Annex detected - BIP-110 invalidates these
+                    // Annex detected — reject under relay policy when enabled
                     return true;
                 }
             }
@@ -590,8 +590,7 @@ impl SpamFilter {
             if let Some(control_block) = witness.last() {
                 // Control block: 33 bytes base + 32 bytes per tree level
                 // TAPROOT_CONTROL_BASE_SIZE = 33, TAPROOT_CONTROL_NODE_SIZE = 32
-                // BIP-110 limits to TAPROOT_CONTROL_MAX_SIZE_REDUCED (257 bytes, depth 7)
-                // For policy, we use a configurable threshold (289 bytes, depth 8)
+                // Relay policy uses a configurable threshold (default 289 bytes, depth 8)
                 if control_block.len() > self.config.max_taproot_control_size {
                     return true;
                 }
@@ -753,7 +752,7 @@ impl SpamFilter {
             return false;
         }
 
-        // OP_RETURN >80 bytes (BIP-110 limit is 83; larger suggests data embedding)
+        // OP_RETURN >80 bytes (relay-policy heuristic; larger suggests data embedding)
         if script[0] == OP_RETURN && script.len() > 80 {
             return true;
         }
